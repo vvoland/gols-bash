@@ -133,6 +133,21 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		s.publishDiagnostics(ctx, p.TextDocument.URI, 0, nil)
 		return reply(ctx, nil, nil)
 
+	case protocol.MethodTextDocumentFormatting:
+		var p protocol.DocumentFormattingParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal formatting: %w", err))
+		}
+		d, _ := s.docs.Get(p.TextDocument.URI)
+		edits, err := s.formatDocument(d, p.Options)
+		if err != nil {
+			return reply(ctx, nil, err)
+		}
+		if edits == nil {
+			edits = []protocol.TextEdit{}
+		}
+		return reply(ctx, edits, nil)
+
 	case protocol.MethodTextDocumentDocumentSymbol:
 		var p protocol.DocumentSymbolParams
 		if err := json.Unmarshal(req.Params(), &p); err != nil {
@@ -161,7 +176,8 @@ func (s *bashServer) initialize(_ *protocol.InitializeParams) *protocol.Initiali
 				OpenClose: true,
 				Change:    sync,
 			},
-			DocumentSymbolProvider: true,
+			DocumentSymbolProvider:     true,
+			DocumentFormattingProvider: true,
 		},
 		ServerInfo: &protocol.ServerInfo{
 			Name:    "gols-bash",

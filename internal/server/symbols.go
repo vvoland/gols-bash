@@ -7,14 +7,13 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// documentSymbols walks the file's top-level statements and emits one
-// DocumentSymbol per function declaration.
-func documentSymbols(file *syntax.File) []protocol.DocumentSymbol {
-	if file == nil {
+// documentSymbols emits one DocumentSymbol per top-level function decl.
+func (s *bashServer) documentSymbols(d *Document) []protocol.DocumentSymbol {
+	if d == nil || d.AST == nil {
 		return nil
 	}
 	var out []protocol.DocumentSymbol
-	for _, stmt := range file.Stmts {
+	for _, stmt := range d.AST.Stmts {
 		fn, ok := stmt.Cmd.(*syntax.FuncDecl)
 		if !ok || fn.Name == nil {
 			continue
@@ -22,27 +21,9 @@ func documentSymbols(file *syntax.File) []protocol.DocumentSymbol {
 		out = append(out, protocol.DocumentSymbol{
 			Name:           fn.Name.Value,
 			Kind:           protocol.SymbolKindFunction,
-			Range:          lspRange(fn.Pos(), fn.End()),
-			SelectionRange: lspRange(fn.Name.Pos(), fn.Name.End()),
+			Range:          s.rangeToLSP(d.Text, fn.Pos(), fn.End()),
+			SelectionRange: s.rangeToLSP(d.Text, fn.Name.Pos(), fn.Name.End()),
 		})
 	}
 	return out
-}
-
-// lspRange converts a mvdan/sh start/end position pair (1-based line/col)
-// to an LSP Range (0-based).
-func lspRange(start, end syntax.Pos) protocol.Range {
-	return protocol.Range{Start: lspPos(start), End: lspPos(end)}
-}
-
-func lspPos(p syntax.Pos) protocol.Position {
-	line := uint32(p.Line())
-	col := uint32(p.Col())
-	if line > 0 {
-		line--
-	}
-	if col > 0 {
-		col--
-	}
-	return protocol.Position{Line: line, Character: col}
 }

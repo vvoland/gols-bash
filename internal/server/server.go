@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync/atomic"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -57,9 +58,10 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 type bashServer struct {
-	log    *slog.Logger
-	docs   *DocumentStore
-	notify notifyFunc
+	log         *slog.Logger
+	docs        *DocumentStore
+	notify      notifyFunc
+	posEncoding atomic.Uint32
 }
 
 func (s *bashServer) publishDiagnostics(ctx context.Context, u uri.URI, version int32, diags []protocol.Diagnostic) {
@@ -79,11 +81,7 @@ func (s *bashServer) publishDiagnostics(ctx context.Context, u uri.URI, version 
 func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	switch req.Method() {
 	case protocol.MethodInitialize:
-		var p protocol.InitializeParams
-		if err := json.Unmarshal(req.Params(), &p); err != nil {
-			return reply(ctx, nil, fmt.Errorf("unmarshal initialize: %w", err))
-		}
-		return reply(ctx, s.initialize(&p), nil)
+		return reply(ctx, s.initialize(req.Params()), nil)
 
 	case protocol.MethodInitialized:
 		s.log.Info("client initialized")
@@ -104,7 +102,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		}
 		d := s.docs.Open(p.TextDocument)
 		s.log.Debug("didOpen", "uri", d.URI, "lang", d.Lang, "len", len(d.Text))
-		s.publishDiagnostics(ctx, d.URI, d.Version, parseDiagnostics(d.ParseErr))
+		s.publishDiagnostics(ctx, d.URI, d.Version, s.parseDiagnostics(d.Text, d.ParseErr))
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodTextDocumentDidChange:
@@ -121,7 +119,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 			s.log.Warn("didChange for unopened document", "uri", p.TextDocument.URI)
 			return reply(ctx, nil, nil)
 		}
-		s.publishDiagnostics(ctx, d.URI, d.Version, parseDiagnostics(d.ParseErr))
+		s.publishDiagnostics(ctx, d.URI, d.Version, s.parseDiagnostics(d.Text, d.ParseErr))
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodTextDocumentDidClose:
@@ -148,6 +146,18 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		}
 		return reply(ctx, edits, nil)
 
+	case protocol.MethodTextDocumentDefinition:
+		var p protocol.DefinitionParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal definition: %w", err))
+		}
+		d, _ := s.docs.Get(p.TextDocument.URI)
+		locs := s.definition(d, p.Position)
+		if locs == nil {
+			locs = []protocol.Location{}
+		}
+		return reply(ctx, locs, nil)
+
 	case protocol.MethodTextDocumentDocumentSymbol:
 		var p protocol.DocumentSymbolParams
 		if err := json.Unmarshal(req.Params(), &p); err != nil {
@@ -157,7 +167,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		if !ok {
 			return reply(ctx, []protocol.DocumentSymbol{}, nil)
 		}
-		syms := documentSymbols(d.AST)
+		syms := s.documentSymbols(d)
 		if syms == nil {
 			syms = []protocol.DocumentSymbol{}
 		}
@@ -165,24 +175,6 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 
 	default:
 		return reply(ctx, nil, jsonrpc2.ErrMethodNotFound)
-	}
-}
-
-func (s *bashServer) initialize(_ *protocol.InitializeParams) *protocol.InitializeResult {
-	sync := protocol.TextDocumentSyncKindFull
-	return &protocol.InitializeResult{
-		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: &protocol.TextDocumentSyncOptions{
-				OpenClose: true,
-				Change:    sync,
-			},
-			DocumentSymbolProvider:     true,
-			DocumentFormattingProvider: true,
-		},
-		ServerInfo: &protocol.ServerInfo{
-			Name:    "gols-bash",
-			Version: "0.0.0",
-		},
 	}
 }
 

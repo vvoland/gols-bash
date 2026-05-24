@@ -10,22 +10,22 @@ import (
 )
 
 // parseDiagnostics converts a mvdan/sh parse error into LSP diagnostics.
-// mvdan/sh stops at the first hard error, so the slice has zero or one entry.
-// Positions are translated from 1-based (mvdan/sh) to 0-based (LSP).
-func parseDiagnostics(err error) []protocol.Diagnostic {
+// mvdan stops at the first hard error, so the slice has zero or one entry.
+// text is needed to convert mvdan's byte column into an encoding-correct
+// LSP position.
+func (s *bashServer) parseDiagnostics(text string, err error) []protocol.Diagnostic {
 	if err == nil {
 		return nil
 	}
 	var pe syntax.ParseError
 	if !errors.As(err, &pe) {
 		return []protocol.Diagnostic{{
-			Range:    protocol.Range{},
 			Severity: protocol.DiagnosticSeverityError,
 			Source:   "bash",
 			Message:  err.Error(),
 		}}
 	}
-	pos := lspPos(pe.Pos)
+	pos := s.posToLSP(text, pe.Pos)
 	return []protocol.Diagnostic{{
 		Range:    protocol.Range{Start: pos, End: pos},
 		Severity: protocol.DiagnosticSeverityError,

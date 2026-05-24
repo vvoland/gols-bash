@@ -67,6 +67,7 @@ type serverCapabilities struct {
 	HoverProvider              bool             `json:"hoverProvider,omitempty"`
 	ReferencesProvider         bool             `json:"referencesProvider,omitempty"`
 	DocumentHighlightProvider  bool             `json:"documentHighlightProvider,omitempty"`
+	RenameProvider             bool             `json:"renameProvider,omitempty"`
 	PositionEncoding           PositionEncoding `json:"positionEncoding,omitempty"`
 }
 
@@ -92,6 +93,7 @@ func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 			HoverProvider:              true,
 			ReferencesProvider:         true,
 			DocumentHighlightProvider:  true,
+			RenameProvider:             true,
 			PositionEncoding:           enc,
 		},
 		ServerInfo: &protocol.ServerInfo{

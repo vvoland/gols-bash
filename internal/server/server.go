@@ -146,6 +146,14 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		}
 		return reply(ctx, edits, nil)
 
+	case protocol.MethodTextDocumentHover:
+		var p protocol.HoverParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal hover: %w", err))
+		}
+		d, _ := s.docs.Get(p.TextDocument.URI)
+		return reply(ctx, s.hover(d, p.Position), nil)
+
 	case protocol.MethodTextDocumentDefinition:
 		var p protocol.DefinitionParams
 		if err := json.Unmarshal(req.Params(), &p); err != nil {

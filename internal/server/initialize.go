@@ -63,6 +63,7 @@ type serverCapabilities struct {
 	DocumentSymbolProvider     bool             `json:"documentSymbolProvider,omitempty"`
 	DocumentFormattingProvider bool             `json:"documentFormattingProvider,omitempty"`
 	DefinitionProvider         bool             `json:"definitionProvider,omitempty"`
+	HoverProvider              bool             `json:"hoverProvider,omitempty"`
 	PositionEncoding           PositionEncoding `json:"positionEncoding,omitempty"`
 }
 
@@ -84,6 +85,7 @@ func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 			DocumentSymbolProvider:     true,
 			DocumentFormattingProvider: true,
 			DefinitionProvider:         true,
+			HoverProvider:              true,
 			PositionEncoding:           enc,
 		},
 		ServerInfo: &protocol.ServerInfo{

@@ -33,7 +33,7 @@ func Run(ctx context.Context, cfg Config) error {
 	stream := jsonrpc2.NewStream(stdio{r: cfg.In, w: cfg.Out})
 	conn := jsonrpc2.NewConn(stream)
 
-	srv := &bashServer{log: logger}
+	srv := &bashServer{log: logger, docs: NewDocumentStore()}
 	conn.Go(ctx, srv.handle)
 
 	select {
@@ -48,7 +48,8 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 type bashServer struct {
-	log *slog.Logger
+	log  *slog.Logger
+	docs *DocumentStore
 }
 
 func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -70,6 +71,37 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 
 	case protocol.MethodExit:
 		s.log.Info("exit")
+		return reply(ctx, nil, nil)
+
+	case protocol.MethodTextDocumentDidOpen:
+		var p protocol.DidOpenTextDocumentParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal didOpen: %w", err))
+		}
+		d := s.docs.Open(p.TextDocument)
+		s.log.Debug("didOpen", "uri", d.URI, "lang", d.Lang, "len", len(d.Text))
+		return reply(ctx, nil, nil)
+
+	case protocol.MethodTextDocumentDidChange:
+		var p protocol.DidChangeTextDocumentParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal didChange: %w", err))
+		}
+		if len(p.ContentChanges) == 0 {
+			return reply(ctx, nil, nil)
+		}
+		last := p.ContentChanges[len(p.ContentChanges)-1]
+		if _, ok := s.docs.Update(p.TextDocument.URI, p.TextDocument.Version, last.Text); !ok {
+			s.log.Warn("didChange for unopened document", "uri", p.TextDocument.URI)
+		}
+		return reply(ctx, nil, nil)
+
+	case protocol.MethodTextDocumentDidClose:
+		var p protocol.DidCloseTextDocumentParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal didClose: %w", err))
+		}
+		s.docs.Close(p.TextDocument.URI)
 		return reply(ctx, nil, nil)
 
 	default:

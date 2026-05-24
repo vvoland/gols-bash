@@ -9,11 +9,15 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"sync/atomic"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+	"mvdan.cc/sh/v3/syntax"
+
+	"grono.dev/gols-bash/internal/analyser"
 )
 
 // notifyFunc sends a notification to the client. Real connections wire this
@@ -43,6 +47,7 @@ func Run(ctx context.Context, cfg Config) error {
 		log:    logger,
 		docs:   NewDocumentStore(),
 		notify: conn.Notify,
+		index:  analyser.NewIndex(),
 	}
 	conn.Go(ctx, srv.handle)
 
@@ -58,10 +63,33 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 type bashServer struct {
-	log         *slog.Logger
-	docs        *DocumentStore
-	notify      notifyFunc
-	posEncoding atomic.Uint32
+	log            *slog.Logger
+	docs           *DocumentStore
+	notify         notifyFunc
+	posEncoding    atomic.Uint32
+	index          *analyser.Index
+	workspaceRoots []string
+}
+
+// indexParse parses src for the workspace scanner. Errors are swallowed
+// to nil — the index ignores nil files, matching the "skip on error"
+// scanner behaviour.
+func (s *bashServer) indexParse(name, src string) *syntax.File {
+	f, _ := newParser().Parse(strings.NewReader(src), name)
+	return f
+}
+
+// scanWorkspaces populates the index from every configured workspace root.
+// Errors on individual files have already been logged by the scanner; a
+// root-level failure (root unreadable) is logged at warn and ignored so
+// the rest of the server keeps working.
+func (s *bashServer) scanWorkspaces(ctx context.Context) {
+	for _, root := range s.workspaceRoots {
+		if err := analyser.ScanWorkspace(ctx, root, s.index, s.indexParse); err != nil {
+			s.log.Warn("workspace scan failed", "root", root, "error", err)
+		}
+	}
+	s.log.Info("workspace scan complete", "files", s.index.Len())
 }
 
 func (s *bashServer) publishDiagnostics(ctx context.Context, u uri.URI, version int32, diags []protocol.Diagnostic) {
@@ -84,7 +112,8 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		return reply(ctx, s.initialize(req.Params()), nil)
 
 	case protocol.MethodInitialized:
-		s.log.Info("client initialized")
+		s.log.Info("client initialized", "workspaceRoots", s.workspaceRoots)
+		go s.scanWorkspaces(context.Background())
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodShutdown:
@@ -102,6 +131,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		}
 		d := s.docs.Open(p.TextDocument)
 		s.log.Debug("didOpen", "uri", d.URI, "lang", d.Lang, "len", len(d.Text))
+		s.index.AddOrReplace(d.URI, d.AST)
 		s.publishDiagnostics(ctx, d.URI, d.Version, s.parseDiagnostics(d.Text, d.ParseErr))
 		return reply(ctx, nil, nil)
 
@@ -119,6 +149,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 			s.log.Warn("didChange for unopened document", "uri", p.TextDocument.URI)
 			return reply(ctx, nil, nil)
 		}
+		s.index.AddOrReplace(d.URI, d.AST)
 		s.publishDiagnostics(ctx, d.URI, d.Version, s.parseDiagnostics(d.Text, d.ParseErr))
 		return reply(ctx, nil, nil)
 
@@ -145,6 +176,30 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 			edits = []protocol.TextEdit{}
 		}
 		return reply(ctx, edits, nil)
+
+	case protocol.MethodTextDocumentDocumentHighlight:
+		var p protocol.DocumentHighlightParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal highlight: %w", err))
+		}
+		d, _ := s.docs.Get(p.TextDocument.URI)
+		hits := s.highlight(d, p.Position)
+		if hits == nil {
+			hits = []protocol.DocumentHighlight{}
+		}
+		return reply(ctx, hits, nil)
+
+	case protocol.MethodTextDocumentReferences:
+		var p protocol.ReferenceParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal references: %w", err))
+		}
+		d, _ := s.docs.Get(p.TextDocument.URI)
+		locs := s.references(d, p.Position, p.Context.IncludeDeclaration)
+		if locs == nil {
+			locs = []protocol.Location{}
+		}
+		return reply(ctx, locs, nil)
 
 	case protocol.MethodTextDocumentHover:
 		var p protocol.HoverParams

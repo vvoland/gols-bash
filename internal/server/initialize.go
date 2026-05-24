@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // PositionEncoding tags how the client wants Position.character counted.
@@ -64,6 +65,8 @@ type serverCapabilities struct {
 	DocumentFormattingProvider bool             `json:"documentFormattingProvider,omitempty"`
 	DefinitionProvider         bool             `json:"definitionProvider,omitempty"`
 	HoverProvider              bool             `json:"hoverProvider,omitempty"`
+	ReferencesProvider         bool             `json:"referencesProvider,omitempty"`
+	DocumentHighlightProvider  bool             `json:"documentHighlightProvider,omitempty"`
 	PositionEncoding           PositionEncoding `json:"positionEncoding,omitempty"`
 }
 
@@ -75,6 +78,7 @@ type initializeResult struct {
 func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 	enc := pickPositionEncoding(raw)
 	s.posEncoding.Store(uint32(enc))
+	s.workspaceRoots = extractWorkspaceRoots(raw)
 
 	return &initializeResult{
 		Capabilities: serverCapabilities{
@@ -86,6 +90,8 @@ func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 			DocumentFormattingProvider: true,
 			DefinitionProvider:         true,
 			HoverProvider:              true,
+			ReferencesProvider:         true,
+			DocumentHighlightProvider:  true,
 			PositionEncoding:           enc,
 		},
 		ServerInfo: &protocol.ServerInfo{
@@ -97,4 +103,42 @@ func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 
 func (s *bashServer) encoding() PositionEncoding {
 	return PositionEncoding(s.posEncoding.Load())
+}
+
+// extractWorkspaceRoots pulls filesystem paths out of LSP initialize
+// params, preferring workspaceFolders (LSP 3.6+) and falling back to the
+// deprecated rootUri/rootPath fields. Non-file URIs are skipped.
+func extractWorkspaceRoots(raw json.RawMessage) []string {
+	var probe struct {
+		RootURI          string `json:"rootUri"`
+		RootPath         string `json:"rootPath"`
+		WorkspaceFolders []struct {
+			URI string `json:"uri"`
+		} `json:"workspaceFolders"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil
+	}
+	var out []string
+	for _, wf := range probe.WorkspaceFolders {
+		if p := uriToPath(wf.URI); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 && probe.RootURI != "" {
+		if p := uriToPath(probe.RootURI); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 && probe.RootPath != "" {
+		out = append(out, probe.RootPath)
+	}
+	return out
+}
+
+func uriToPath(s string) string {
+	if s == "" {
+		return ""
+	}
+	return uri.URI(s).Filename()
 }

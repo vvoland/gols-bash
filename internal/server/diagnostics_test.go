@@ -13,6 +13,8 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+
+	"grono.dev/gols-bash/internal/analyser"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 )
@@ -43,6 +45,7 @@ func newTestServer() (*bashServer, *notifyRecorder) {
 		log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		docs:   NewDocumentStore(),
 		notify: rec.notify,
+		index:  analyser.NewIndex(),
 	}
 	return s, rec
 }

@@ -12,7 +12,12 @@ import (
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
+
+// notifyFunc sends a notification to the client. Real connections wire this
+// to jsonrpc2.Conn.Notify; tests substitute a recording stub.
+type notifyFunc func(ctx context.Context, method string, params interface{}) error
 
 // Config is the runtime configuration passed in from main.
 type Config struct {
@@ -33,7 +38,11 @@ func Run(ctx context.Context, cfg Config) error {
 	stream := jsonrpc2.NewStream(stdio{r: cfg.In, w: cfg.Out})
 	conn := jsonrpc2.NewConn(stream)
 
-	srv := &bashServer{log: logger, docs: NewDocumentStore()}
+	srv := &bashServer{
+		log:    logger,
+		docs:   NewDocumentStore(),
+		notify: conn.Notify,
+	}
 	conn.Go(ctx, srv.handle)
 
 	select {
@@ -48,8 +57,23 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 type bashServer struct {
-	log  *slog.Logger
-	docs *DocumentStore
+	log    *slog.Logger
+	docs   *DocumentStore
+	notify notifyFunc
+}
+
+func (s *bashServer) publishDiagnostics(ctx context.Context, u uri.URI, version int32, diags []protocol.Diagnostic) {
+	if diags == nil {
+		diags = []protocol.Diagnostic{}
+	}
+	err := s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
+		URI:         u,
+		Version:     uint32(version),
+		Diagnostics: diags,
+	})
+	if err != nil {
+		s.log.Warn("publishDiagnostics failed", "uri", u, "error", err)
+	}
 }
 
 func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -80,6 +104,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		}
 		d := s.docs.Open(p.TextDocument)
 		s.log.Debug("didOpen", "uri", d.URI, "lang", d.Lang, "len", len(d.Text))
+		s.publishDiagnostics(ctx, d.URI, d.Version, parseDiagnostics(d.ParseErr))
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodTextDocumentDidChange:
@@ -91,9 +116,12 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 			return reply(ctx, nil, nil)
 		}
 		last := p.ContentChanges[len(p.ContentChanges)-1]
-		if _, ok := s.docs.Update(p.TextDocument.URI, p.TextDocument.Version, last.Text); !ok {
+		d, ok := s.docs.Update(p.TextDocument.URI, p.TextDocument.Version, last.Text)
+		if !ok {
 			s.log.Warn("didChange for unopened document", "uri", p.TextDocument.URI)
+			return reply(ctx, nil, nil)
 		}
+		s.publishDiagnostics(ctx, d.URI, d.Version, parseDiagnostics(d.ParseErr))
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodTextDocumentDidClose:
@@ -102,6 +130,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 			return reply(ctx, nil, fmt.Errorf("unmarshal didClose: %w", err))
 		}
 		s.docs.Close(p.TextDocument.URI)
+		s.publishDiagnostics(ctx, p.TextDocument.URI, 0, nil)
 		return reply(ctx, nil, nil)
 
 	default:

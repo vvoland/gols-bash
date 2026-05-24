@@ -42,3 +42,21 @@ func TestDocumentStoreLifecycle(t *testing.T) {
 	assert.Assert(t, cmp.Len(s.All(), 0))
 	assert.Assert(t, cmp.Equal(s.Close(u), false))
 }
+
+func TestDocumentStoreParses(t *testing.T) {
+	s := NewDocumentStore()
+	u := uri.URI("file:///tmp/script.sh")
+
+	d := s.Open(protocol.TextDocumentItem{
+		URI:     u,
+		Version: 1,
+		Text:    "echo hello\n",
+	})
+	assert.NilError(t, d.ParseErr)
+	assert.Assert(t, d.AST != nil)
+	assert.Assert(t, cmp.Len(d.AST.Stmts, 1))
+
+	d2, ok := s.Update(u, 2, "if then\n")
+	assert.Assert(t, ok)
+	assert.Assert(t, d2.ParseErr != nil, "malformed input should produce ParseErr")
+}

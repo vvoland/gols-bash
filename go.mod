@@ -7,6 +7,7 @@ require (
 	go.lsp.dev/protocol v0.12.0
 	go.lsp.dev/uri v0.3.0
 	gotest.tools/v3 v3.5.2
+	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (

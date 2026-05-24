@@ -3,19 +3,33 @@
 package server
 
 import (
+	"strings"
 	"sync"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // Document is the latest known content of an open buffer. Version numbering
-// is owned by the client per LSP.
+// is owned by the client per LSP. AST and ParseErr reflect the latest Text;
+// AST may be non-nil even when ParseErr is set — mvdan/sh recovers from
+// many errors.
 type Document struct {
-	URI     uri.URI
-	Lang    protocol.LanguageIdentifier
-	Version int32
-	Text    string
+	URI      uri.URI
+	Lang     protocol.LanguageIdentifier
+	Version  int32
+	Text     string
+	AST      *syntax.File
+	ParseErr error
+}
+
+func newParser() *syntax.Parser {
+	return syntax.NewParser(syntax.KeepComments(true), syntax.Variant(syntax.LangBash))
+}
+
+func (d *Document) reparse() {
+	d.AST, d.ParseErr = newParser().Parse(strings.NewReader(d.Text), d.URI.Filename())
 }
 
 type DocumentStore struct {
@@ -36,6 +50,7 @@ func (s *DocumentStore) Open(item protocol.TextDocumentItem) *Document {
 		Version: item.Version,
 		Text:    item.Text,
 	}
+	d.reparse()
 	s.mu.Lock()
 	s.docs[item.URI] = d
 	s.mu.Unlock()
@@ -52,6 +67,7 @@ func (s *DocumentStore) Update(u uri.URI, version int32, text string) (*Document
 	}
 	d.Version = version
 	d.Text = text
+	d.reparse()
 	return d, true
 }
 

@@ -13,9 +13,10 @@ Requires Go 1.25+. The binary is CGO-free and statically linkable.
 ## Run
 
 ```sh
-gols-bash               # log to stderr
-gols-bash -verbose      # debug-level logging
-gols-bash -log /tmp/gols-bash.log
+gols-bash                          # log to stderr at info level
+gols-bash -log-level debug         # debug-level logging
+gols-bash -log-file /tmp/gols.log  # redirect logs to a file
+gols-bash -version                 # print version and exit
 ```
 
 The server is launched by your editor's LSP client; it talks JSON-RPC

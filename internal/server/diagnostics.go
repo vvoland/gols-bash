@@ -25,15 +25,7 @@ func parseDiagnostics(err error) []protocol.Diagnostic {
 			Message:  err.Error(),
 		}}
 	}
-	line := uint32(pe.Pos.Line())
-	col := uint32(pe.Pos.Col())
-	if line > 0 {
-		line--
-	}
-	if col > 0 {
-		col--
-	}
-	pos := protocol.Position{Line: line, Character: col}
+	pos := lspPos(pe.Pos)
 	return []protocol.Diagnostic{{
 		Range:    protocol.Range{Start: pos, End: pos},
 		Severity: protocol.DiagnosticSeverityError,

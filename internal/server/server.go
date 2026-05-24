@@ -133,6 +133,21 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		s.publishDiagnostics(ctx, p.TextDocument.URI, 0, nil)
 		return reply(ctx, nil, nil)
 
+	case protocol.MethodTextDocumentDocumentSymbol:
+		var p protocol.DocumentSymbolParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal documentSymbol: %w", err))
+		}
+		d, ok := s.docs.Get(p.TextDocument.URI)
+		if !ok {
+			return reply(ctx, []protocol.DocumentSymbol{}, nil)
+		}
+		syms := documentSymbols(d.AST)
+		if syms == nil {
+			syms = []protocol.DocumentSymbol{}
+		}
+		return reply(ctx, syms, nil)
+
 	default:
 		return reply(ctx, nil, jsonrpc2.ErrMethodNotFound)
 	}
@@ -146,6 +161,7 @@ func (s *bashServer) initialize(_ *protocol.InitializeParams) *protocol.Initiali
 				OpenClose: true,
 				Change:    sync,
 			},
+			DocumentSymbolProvider: true,
 		},
 		ServerInfo: &protocol.ServerInfo{
 			Name:    "gols-bash",

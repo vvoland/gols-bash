@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"go.lsp.dev/jsonrpc2"
@@ -44,10 +45,12 @@ func Run(ctx context.Context, cfg Config) error {
 	conn := jsonrpc2.NewConn(stream)
 
 	srv := &bashServer{
-		log:    logger,
-		docs:   NewDocumentStore(),
-		notify: conn.Notify,
-		index:  analyser.NewIndex(),
+		log:         logger,
+		docs:        NewDocumentStore(),
+		notify:      conn.Notify,
+		index:       analyser.NewIndex(),
+		codeActions: make(map[uri.URI][]protocol.CodeAction),
+		shellcheck:  newShellCheckRunner("shellcheck", logger).lint,
 	}
 	conn.Go(ctx, srv.handle)
 
@@ -68,6 +71,9 @@ type bashServer struct {
 	notify         notifyFunc
 	posEncoding    atomic.Uint32
 	index          *analyser.Index
+	codeActionsMu  sync.RWMutex
+	codeActions    map[uri.URI][]protocol.CodeAction
+	shellcheck     shellcheckFunc
 	workspaceRoots []string
 }
 
@@ -132,7 +138,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		d := s.docs.Open(p.TextDocument)
 		s.log.Debug("didOpen", "uri", d.URI, "lang", d.Lang, "len", len(d.Text))
 		s.index.AddOrReplace(d.URI, d.AST)
-		s.publishDiagnostics(ctx, d.URI, d.Version, s.parseDiagnostics(d.Text, d.ParseErr))
+		s.publishDiagnostics(ctx, d.URI, d.Version, s.documentDiagnostics(ctx, d))
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodTextDocumentDidChange:
@@ -150,7 +156,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 			return reply(ctx, nil, nil)
 		}
 		s.index.AddOrReplace(d.URI, d.AST)
-		s.publishDiagnostics(ctx, d.URI, d.Version, s.parseDiagnostics(d.Text, d.ParseErr))
+		s.publishDiagnostics(ctx, d.URI, d.Version, s.documentDiagnostics(ctx, d))
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodTextDocumentDidClose:
@@ -159,8 +165,16 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 			return reply(ctx, nil, fmt.Errorf("unmarshal didClose: %w", err))
 		}
 		s.docs.Close(p.TextDocument.URI)
+		s.setCodeActions(p.TextDocument.URI, nil)
 		s.publishDiagnostics(ctx, p.TextDocument.URI, 0, nil)
 		return reply(ctx, nil, nil)
+
+	case protocol.MethodTextDocumentCodeAction:
+		var p protocol.CodeActionParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal codeAction: %w", err))
+		}
+		return reply(ctx, s.codeActionsFor(p), nil)
 
 	case protocol.MethodTextDocumentCompletion:
 		var p protocol.CompletionParams

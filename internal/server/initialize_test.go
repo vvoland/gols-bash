@@ -35,4 +35,5 @@ func TestInitializeAdvertisesPickedEncoding(t *testing.T) {
 	assert.Equal(t, s.encoding(), EncodingUTF8)
 	assert.Equal(t, res.Capabilities.DefinitionProvider, true)
 	assert.Assert(t, res.Capabilities.CompletionProvider != nil)
+	assert.Assert(t, res.Capabilities.CodeActionProvider != nil)
 }

@@ -286,6 +286,17 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		}
 		return reply(ctx, syms, nil)
 
+	case protocol.MethodWorkspaceSymbol:
+		var p protocol.WorkspaceSymbolParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal workspaceSymbol: %w", err))
+		}
+		syms := s.workspaceSymbols(p.Query)
+		if syms == nil {
+			syms = []protocol.SymbolInformation{}
+		}
+		return reply(ctx, syms, nil)
+
 	default:
 		return reply(ctx, nil, jsonrpc2.ErrMethodNotFound)
 	}

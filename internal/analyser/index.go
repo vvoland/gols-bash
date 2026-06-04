@@ -58,6 +58,24 @@ type UsageHit struct {
 	Usage Usage
 }
 
+type DeclarationHit struct {
+	URI         uri.URI
+	Declaration Declaration
+}
+
+// AllDeclarations walks every indexed file's AST for declarations.
+func (i *Index) AllDeclarations() []DeclarationHit {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	var hits []DeclarationHit
+	for u, file := range i.entries {
+		for _, decl := range FindDeclarations(file) {
+			hits = append(hits, DeclarationHit{URI: u, Declaration: decl})
+		}
+	}
+	return hits
+}
+
 // AllUsages walks every indexed file's AST for occurrences of name.
 // When includeDecl is false, write usages are skipped to match LSP's
 // ReferenceContext.IncludeDeclaration semantics.

@@ -64,6 +64,7 @@ type serverCapabilities struct {
 	CodeActionProvider         any              `json:"codeActionProvider,omitempty"`
 	CompletionProvider         any              `json:"completionProvider,omitempty"`
 	DocumentSymbolProvider     bool             `json:"documentSymbolProvider,omitempty"`
+	WorkspaceSymbolProvider    bool             `json:"workspaceSymbolProvider,omitempty"`
 	DocumentFormattingProvider bool             `json:"documentFormattingProvider,omitempty"`
 	DefinitionProvider         bool             `json:"definitionProvider,omitempty"`
 	HoverProvider              bool             `json:"hoverProvider,omitempty"`
@@ -95,6 +96,7 @@ func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 			},
 			CodeActionProvider:         s.codeActionOptions(),
 			DocumentSymbolProvider:     true,
+			WorkspaceSymbolProvider:    true,
 			DocumentFormattingProvider: true,
 			DefinitionProvider:         true,
 			HoverProvider:              true,

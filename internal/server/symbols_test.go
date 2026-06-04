@@ -61,3 +61,39 @@ func TestDocumentSymbolUnknownDoc(t *testing.T) {
 		protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI("file:///nope")}})
 	assert.Assert(t, cmp.Len(syms, 0))
 }
+
+func TestWorkspaceSymbolListsIndexedDeclarations(t *testing.T) {
+	s, _ := newTestServer()
+	u := uri.URI("file:///tmp/workspace.sh")
+
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     u,
+			Version: 1,
+			Text:    "target_var=1\ntarget_fn() {\n  echo hi\n}\nother=2\n",
+		},
+	})
+
+	syms := call[[]protocol.SymbolInformation](t, s, protocol.MethodWorkspaceSymbol,
+		protocol.WorkspaceSymbolParams{Query: "target"})
+
+	assert.Assert(t, cmp.Len(syms, 2))
+	assert.Equal(t, syms[0].Name, "target_fn")
+	assert.Equal(t, syms[0].Kind, protocol.SymbolKindFunction)
+	assert.Equal(t, syms[0].Location.URI, u)
+	assert.Equal(t, syms[1].Name, "target_var")
+	assert.Equal(t, syms[1].Kind, protocol.SymbolKindVariable)
+}
+
+func TestWorkspaceSymbolUnknownQueryReturnsEmptyList(t *testing.T) {
+	s, _ := newTestServer()
+	u := uri.URI("file:///tmp/workspace.sh")
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: u, Version: 1, Text: "present=1\n"},
+	})
+
+	syms := call[[]protocol.SymbolInformation](t, s, protocol.MethodWorkspaceSymbol,
+		protocol.WorkspaceSymbolParams{Query: "missing"})
+
+	assert.Assert(t, cmp.Len(syms, 0))
+}

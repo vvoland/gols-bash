@@ -8,13 +8,14 @@ import (
 )
 
 type serverSettings struct {
-	ShellCheckPath      string
-	ShellCheckArguments []string
-	FormatIndentSpaces  *uint
+	ShellCheckPath       string
+	ShellCheckArguments  []string
+	FormatIndentSpaces   *uint
+	WorkspaceScanEnabled bool
 }
 
 func defaultSettings() serverSettings {
-	return serverSettings{ShellCheckPath: "shellcheck"}
+	return serverSettings{ShellCheckPath: "shellcheck", WorkspaceScanEnabled: true}
 }
 
 func parseSettings(raw json.RawMessage, current serverSettings) serverSettings {
@@ -34,9 +35,10 @@ func parseSettings(raw json.RawMessage, current serverSettings) serverSettings {
 
 func applySettingsObject(raw json.RawMessage, settings *serverSettings) {
 	var probe struct {
-		ShellCheckPath      *string         `json:"shellcheckPath"`
-		ShellCheckArguments json.RawMessage `json:"shellcheckArguments"`
-		FormatIndentSpaces  json.RawMessage `json:"formatIndentSpaces"`
+		ShellCheckPath       *string         `json:"shellcheckPath"`
+		ShellCheckArguments  json.RawMessage `json:"shellcheckArguments"`
+		FormatIndentSpaces   json.RawMessage `json:"formatIndentSpaces"`
+		WorkspaceScanEnabled *bool           `json:"workspaceScanEnabled"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return
@@ -49,6 +51,9 @@ func applySettingsObject(raw json.RawMessage, settings *serverSettings) {
 	}
 	if len(probe.FormatIndentSpaces) > 0 {
 		settings.FormatIndentSpaces = parseUintPointer(probe.FormatIndentSpaces, settings.FormatIndentSpaces)
+	}
+	if probe.WorkspaceScanEnabled != nil {
+		settings.WorkspaceScanEnabled = *probe.WorkspaceScanEnabled
 	}
 }
 

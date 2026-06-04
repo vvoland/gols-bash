@@ -94,6 +94,13 @@ func (s *bashServer) indexParse(name, src string) *syntax.File {
 // root-level failure (root unreadable) is logged at warn and ignored so
 // the rest of the server keeps working.
 func (s *bashServer) scanWorkspaces(ctx context.Context) {
+	s.settingsMu.RLock()
+	enabled := s.settings.WorkspaceScanEnabled
+	s.settingsMu.RUnlock()
+	if !enabled {
+		s.log.Info("workspace scan disabled")
+		return
+	}
 	for _, root := range s.workspaceRoots {
 		if err := analyser.ScanWorkspace(ctx, root, s.index, s.indexParse); err != nil {
 			s.log.Warn("workspace scan failed", "root", root, "error", err)

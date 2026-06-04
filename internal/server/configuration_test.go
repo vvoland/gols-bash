@@ -4,6 +4,8 @@ package server
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -16,13 +18,15 @@ func TestParseSettingsAcceptsTopLevelShellCheckConfig(t *testing.T) {
 	settings := parseSettings([]byte(`{
 		"shellcheckPath": "/custom/shellcheck",
 		"shellcheckArguments": ["--external-sources"],
-		"formatIndentSpaces": 2
+		"formatIndentSpaces": 2,
+		"workspaceScanEnabled": false
 	}`), defaultSettings())
 
 	assert.Equal(t, settings.ShellCheckPath, "/custom/shellcheck")
 	assert.DeepEqual(t, settings.ShellCheckArguments, []string{"--external-sources"})
 	assert.Assert(t, settings.FormatIndentSpaces != nil)
 	assert.Equal(t, *settings.FormatIndentSpaces, uint(2))
+	assert.Equal(t, settings.WorkspaceScanEnabled, false)
 }
 
 func TestParseSettingsAcceptsNestedBashIdeConfig(t *testing.T) {
@@ -30,7 +34,8 @@ func TestParseSettingsAcceptsNestedBashIdeConfig(t *testing.T) {
 		"bashIde": {
 			"shellcheckPath": "/nested/shellcheck",
 			"shellcheckArguments": "--shell=bash",
-			"formatIndentSpaces": 3
+			"formatIndentSpaces": 3,
+			"workspaceScanEnabled": false
 		}
 	}`), defaultSettings())
 
@@ -38,6 +43,19 @@ func TestParseSettingsAcceptsNestedBashIdeConfig(t *testing.T) {
 	assert.DeepEqual(t, settings.ShellCheckArguments, []string{"--shell=bash"})
 	assert.Assert(t, settings.FormatIndentSpaces != nil)
 	assert.Equal(t, *settings.FormatIndentSpaces, uint(3))
+	assert.Equal(t, settings.WorkspaceScanEnabled, false)
+}
+
+func TestScanWorkspacesHonorsWorkspaceScanEnabled(t *testing.T) {
+	root := t.TempDir()
+	assert.NilError(t, os.WriteFile(filepath.Join(root, "lib.sh"), []byte("greet() { :; }\n"), 0o644))
+
+	s, _ := newTestServer()
+	s.workspaceRoots = []string{root}
+	s.applySettings(parseSettings([]byte(`{"workspaceScanEnabled": false}`), s.settings))
+	s.scanWorkspaces(context.Background())
+
+	assert.Equal(t, s.index.Len(), 0)
 }
 
 func TestDidChangeConfigurationDisablesShellCheckAndRelintsOpenDocs(t *testing.T) {

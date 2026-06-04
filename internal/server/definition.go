@@ -3,14 +3,16 @@
 package server
 
 import (
-	"go.lsp.dev/protocol"
-	"mvdan.cc/sh/v3/syntax"
+	"sort"
 
+	"go.lsp.dev/protocol"
+
+	"grono.dev/gols-bash/internal/analyser"
 	utillsp "grono.dev/gols-bash/internal/util/lsp"
 )
 
-// definition resolves the word under pos to a same-file function declaration.
-// Variables, sourced files, and indexed workspace declarations are not yet used.
+// definition resolves the word under pos to an indexed function or variable
+// declaration, preferring declarations in the current document.
 func (s *bashServer) definition(d *Document, pos protocol.Position) []protocol.Location {
 	if d == nil || d.AST == nil {
 		return nil
@@ -23,15 +25,34 @@ func (s *bashServer) definition(d *Document, pos protocol.Position) []protocol.L
 	if word == "" {
 		return nil
 	}
-	for _, stmt := range d.AST.Stmts {
-		fn, ok := stmt.Cmd.(*syntax.FuncDecl)
-		if !ok || fn.Name == nil || fn.Name.Value != word {
+	for _, decl := range analyser.FindDeclarations(d.AST) {
+		if decl.Name != word {
 			continue
 		}
 		return []protocol.Location{{
 			URI:   d.URI,
-			Range: s.rangeToLSP(d.Text, fn.Name.Pos(), fn.Name.End()),
+			Range: s.rangeToLSP(d.Text, decl.Pos, decl.End),
+		}}
+	}
+	for _, hit := range sortedDeclarationHits(s.index.AllDeclarations()) {
+		if hit.URI == d.URI || hit.Declaration.Name != word {
+			continue
+		}
+		text := s.textForURI(hit.URI)
+		return []protocol.Location{{
+			URI:   hit.URI,
+			Range: s.rangeToLSP(text, hit.Declaration.Pos, hit.Declaration.End),
 		}}
 	}
 	return nil
+}
+
+func sortedDeclarationHits(hits []analyser.DeclarationHit) []analyser.DeclarationHit {
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].URI != hits[j].URI {
+			return hits[i].URI < hits[j].URI
+		}
+		return hits[i].Declaration.Pos.Offset() < hits[j].Declaration.Pos.Offset()
+	})
+	return hits
 }

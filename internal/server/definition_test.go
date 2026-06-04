@@ -3,6 +3,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -43,6 +45,51 @@ func TestDefinitionJumpsToFunction(t *testing.T) {
 	assert.Equal(t, locs[0].Range.Start.Line, uint32(0))
 	assert.Equal(t, locs[0].Range.Start.Character, uint32(0))
 	assert.Equal(t, locs[0].Range.End.Character, uint32(5)) // len("greet")
+}
+
+func TestDefinitionJumpsToVariable(t *testing.T) {
+	s, _ := newTestServer()
+	u := uri.URI("file:///tmp/def.sh")
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: u, Version: 1, Text: "name=world\necho $name\n"},
+	})
+
+	locs := call[[]protocol.Location](t, s, protocol.MethodTextDocumentDefinition,
+		protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: u},
+			Position:     protocol.Position{Line: 1, Character: 7},
+		}})
+
+	assert.Assert(t, cmp.Len(locs, 1))
+	assert.Equal(t, locs[0].URI, u)
+	assert.Equal(t, locs[0].Range.Start.Line, uint32(0))
+	assert.Equal(t, locs[0].Range.Start.Character, uint32(0))
+	assert.Equal(t, locs[0].Range.End.Character, uint32(4))
+}
+
+func TestDefinitionJumpsToWorkspaceDeclaration(t *testing.T) {
+	root := t.TempDir()
+	libPath := filepath.Join(root, "lib.sh")
+	usePath := filepath.Join(root, "use.sh")
+	libSrc := "greet() { echo hi; }\n"
+	assert.NilError(t, os.WriteFile(libPath, []byte(libSrc), 0o644))
+
+	s, _ := newTestServer()
+	s.index.AddOrReplace(uri.File(libPath), s.indexParse(libPath, libSrc))
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: uri.File(usePath), Version: 1, Text: "greet\n"},
+	})
+
+	locs := call[[]protocol.Location](t, s, protocol.MethodTextDocumentDefinition,
+		protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(usePath)},
+			Position:     protocol.Position{Line: 0, Character: 0},
+		}})
+
+	assert.Assert(t, cmp.Len(locs, 1))
+	assert.Equal(t, locs[0].URI, uri.File(libPath))
+	assert.Equal(t, locs[0].Range.Start.Line, uint32(0))
+	assert.Equal(t, locs[0].Range.Start.Character, uint32(0))
 }
 
 func TestDefinitionUnknownWordReturnsEmpty(t *testing.T) {

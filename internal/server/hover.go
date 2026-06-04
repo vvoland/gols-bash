@@ -5,7 +5,6 @@ package server
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 
 	"go.lsp.dev/protocol"
 	"mvdan.cc/sh/v3/syntax"
@@ -55,14 +54,7 @@ func (s *bashServer) hoverMarkdownFor(word string, d *Document) string {
 }
 
 func (s *bashServer) findWorkspaceDeclaration(word string) (analyser.DeclarationHit, bool) {
-	hits := s.index.AllDeclarations()
-	sort.Slice(hits, func(i, j int) bool {
-		if hits[i].URI != hits[j].URI {
-			return hits[i].URI < hits[j].URI
-		}
-		return hits[i].Declaration.Pos.Offset() < hits[j].Declaration.Pos.Offset()
-	})
-	for _, h := range hits {
+	for _, h := range sortedDeclarationHits(s.index.AllDeclarations()) {
 		if h.Declaration.Name == word {
 			return h, true
 		}

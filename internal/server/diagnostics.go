@@ -26,11 +26,14 @@ type shellcheckFunc func(context.Context, *Document) (diagnosticResult, error)
 
 func (s *bashServer) documentDiagnostics(ctx context.Context, d *Document) []protocol.Diagnostic {
 	diags := s.parseDiagnostics(d.Text, d.ParseErr)
-	if len(diags) > 0 || s.shellcheck == nil {
+	s.settingsMu.RLock()
+	shellcheck := s.shellcheck
+	s.settingsMu.RUnlock()
+	if len(diags) > 0 || shellcheck == nil {
 		s.setCodeActions(d.URI, nil)
 		return diags
 	}
-	lintResult, err := s.shellcheck(ctx, d)
+	lintResult, err := shellcheck(ctx, d)
 	if err != nil {
 		s.log.Warn("shellcheck failed", "uri", d.URI, "error", err)
 		s.setCodeActions(d.URI, nil)
@@ -42,19 +45,22 @@ func (s *bashServer) documentDiagnostics(ctx context.Context, d *Document) []pro
 
 type shellCheckRunner struct {
 	path     string
+	args     []string
 	log      *slog.Logger
 	disabled atomic.Bool
 }
 
-func newShellCheckRunner(path string, log *slog.Logger) *shellCheckRunner {
-	return &shellCheckRunner{path: path, log: log}
+func newShellCheckRunner(path string, args []string, log *slog.Logger) *shellCheckRunner {
+	return &shellCheckRunner{path: path, args: args, log: log}
 }
 
 func (r *shellCheckRunner) lint(ctx context.Context, d *Document) (diagnosticResult, error) {
 	if r.disabled.Load() {
 		return diagnosticResult{}, nil
 	}
-	cmd := exec.CommandContext(ctx, r.path, "--format=json1", "-")
+	args := append([]string{"--format=json1"}, r.args...)
+	args = append(args, "-")
+	cmd := exec.CommandContext(ctx, r.path, args...)
 	cmd.Stdin = bytes.NewBufferString(d.Text)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

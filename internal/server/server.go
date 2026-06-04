@@ -44,13 +44,15 @@ func Run(ctx context.Context, cfg Config) error {
 	stream := jsonrpc2.NewStream(stdio{r: cfg.In, w: cfg.Out})
 	conn := jsonrpc2.NewConn(stream)
 
+	settings := defaultSettings()
 	srv := &bashServer{
 		log:         logger,
 		docs:        NewDocumentStore(),
 		notify:      conn.Notify,
 		index:       analyser.NewIndex(),
 		codeActions: make(map[uri.URI][]protocol.CodeAction),
-		shellcheck:  newShellCheckRunner("shellcheck", logger).lint,
+		settings:    settings,
+		shellcheck:  newShellCheckRunner(settings.ShellCheckPath, settings.ShellCheckArguments, logger).lint,
 	}
 	conn.Go(ctx, srv.handle)
 
@@ -73,6 +75,8 @@ type bashServer struct {
 	index          *analyser.Index
 	codeActionsMu  sync.RWMutex
 	codeActions    map[uri.URI][]protocol.CodeAction
+	settingsMu     sync.RWMutex
+	settings       serverSettings
 	shellcheck     shellcheckFunc
 	workspaceRoots []string
 }
@@ -120,6 +124,10 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 	case protocol.MethodInitialized:
 		s.log.Info("client initialized", "workspaceRoots", s.workspaceRoots)
 		go s.scanWorkspaces(context.Background())
+		return reply(ctx, nil, nil)
+
+	case protocol.MethodWorkspaceDidChangeConfiguration:
+		s.handleDidChangeConfiguration(ctx, req.Params())
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodShutdown:

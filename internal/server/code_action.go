@@ -7,6 +7,10 @@ import (
 	"go.lsp.dev/uri"
 )
 
+func (s *bashServer) codeActionOptions() *protocol.CodeActionOptions {
+	return &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.QuickFix}}
+}
+
 func (s *bashServer) setCodeActions(u uri.URI, actions []protocol.CodeAction) {
 	s.codeActionsMu.Lock()
 	defer s.codeActionsMu.Unlock()

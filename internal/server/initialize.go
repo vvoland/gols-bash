@@ -93,9 +93,7 @@ func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 				ResolveProvider:   true,
 				TriggerCharacters: []string{"$", "{", "-"},
 			},
-			CodeActionProvider: &protocol.CodeActionOptions{
-				CodeActionKinds: []protocol.CodeActionKind{protocol.QuickFix},
-			},
+			CodeActionProvider:         s.codeActionOptions(),
 			DocumentSymbolProvider:     true,
 			DocumentFormattingProvider: true,
 			DefinitionProvider:         true,

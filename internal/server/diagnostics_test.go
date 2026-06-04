@@ -47,6 +47,7 @@ func newTestServer() (*bashServer, *notifyRecorder) {
 		notify:      rec.notify,
 		index:       analyser.NewIndex(),
 		codeActions: make(map[uri.URI][]protocol.CodeAction),
+		settings:    defaultSettings(),
 	}
 	return s, rec
 }

@@ -3,6 +3,7 @@
 package server
 
 import (
+	"os"
 	"sort"
 	"strings"
 
@@ -119,6 +120,17 @@ func completionCandidates(file *syntax.File, varsOnly bool) []completionCandidat
 			label:      name,
 			detail:     "bash builtin",
 			kind:       protocol.CompletionItemKindFunction,
+			textFormat: protocol.InsertTextFormatPlainText,
+		})
+	}
+	for _, name := range data.ExecutablesFromPath(os.Getenv("PATH")) {
+		if data.IsBuiltin(name) {
+			continue
+		}
+		out = append(out, completionCandidate{
+			label:      name,
+			detail:     "PATH executable",
+			kind:       protocol.CompletionItemKindFile,
 			textFormat: protocol.InsertTextFormatPlainText,
 		})
 	}

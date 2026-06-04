@@ -3,6 +3,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -56,6 +58,31 @@ func TestCompletionInParameterExpansionReturnsVariablesOnly(t *testing.T) {
 
 	assert.Assert(t, completionHas(list.Items, "my_var", protocol.CompletionItemKindVariable))
 	assert.Assert(t, !completionHasLabel(list.Items, "mapfile"))
+}
+
+func TestCompletionIncludesPathExecutables(t *testing.T) {
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "custom-tool")
+	notExecutable := filepath.Join(dir, "custom-data")
+	assert.NilError(t, os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o755))
+	assert.NilError(t, os.WriteFile(notExecutable, []byte("data\n"), 0o644))
+	t.Setenv("PATH", dir)
+
+	s, _ := newTestServer()
+	u := uri.URI("file:///tmp/completion.sh")
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: u, Version: 1, Text: "custom"},
+	})
+
+	list := call[*protocol.CompletionList](t, s, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: u},
+			Position:     protocol.Position{Line: 0, Character: 6},
+		},
+	})
+
+	assert.Assert(t, completionHas(list.Items, "custom-tool", protocol.CompletionItemKindFile))
+	assert.Assert(t, !completionHasLabel(list.Items, "custom-data"))
 }
 
 func TestCompletionResolveReturnsItem(t *testing.T) {

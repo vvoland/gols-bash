@@ -10,9 +10,8 @@ import (
 	utillsp "grono.dev/gols-bash/internal/util/lsp"
 )
 
-// rename returns a workspace-wide edit renaming every occurrence of the
-// word under pos to newName. Bash names are global, so this rewrites across
-// every indexed file.
+// rename returns a best-effort workspace-wide edit for the word under pos.
+// It does not yet model Bash local scope or sourced-file reachability.
 //
 // Returns (nil, error) when newName is missing or not a valid identifier.
 // Returns (empty WorkspaceEdit, nil) when the cursor is on no word or the

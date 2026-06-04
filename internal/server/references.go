@@ -11,8 +11,8 @@ import (
 	utillsp "grono.dev/gols-bash/internal/util/lsp"
 )
 
-// references returns every occurrence of the word under pos in the current
-// document. Cross-file lookups need the workspace index, not yet in place.
+// references returns indexed occurrences of the word under pos.
+// It is name-based and does not yet model Bash scope or sourced-file reachability.
 func (s *bashServer) references(d *Document, pos protocol.Position, includeDecl bool) []protocol.Location {
 	if d == nil || d.AST == nil {
 		return nil

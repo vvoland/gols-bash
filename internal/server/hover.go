@@ -12,9 +12,8 @@ import (
 	utillsp "grono.dev/gols-bash/internal/util/lsp"
 )
 
-// hover returns the markup shown on hover. Lookup order: reserved word,
-// builtin, local function declaration. Cross-file lookups via sourced
-// files require the workspace analyser, not yet in place.
+// hover returns the markup shown on hover.
+// Lookup is limited to reserved words, builtins, and same-file functions.
 func (s *bashServer) hover(d *Document, pos protocol.Position) *protocol.Hover {
 	if d == nil {
 		return nil

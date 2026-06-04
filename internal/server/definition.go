@@ -9,8 +9,8 @@ import (
 	utillsp "grono.dev/gols-bash/internal/util/lsp"
 )
 
-// definition resolves the word under pos to a function declaration in the
-// same document. Cross-file (sourced) definitions are not yet supported.
+// definition resolves the word under pos to a same-file function declaration.
+// Variables, sourced files, and indexed workspace declarations are not yet used.
 func (s *bashServer) definition(d *Document, pos protocol.Position) []protocol.Location {
 	if d == nil || d.AST == nil {
 		return nil

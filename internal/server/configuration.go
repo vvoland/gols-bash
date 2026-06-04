@@ -10,6 +10,7 @@ import (
 type serverSettings struct {
 	ShellCheckPath      string
 	ShellCheckArguments []string
+	FormatIndentSpaces  *uint
 }
 
 func defaultSettings() serverSettings {
@@ -35,6 +36,7 @@ func applySettingsObject(raw json.RawMessage, settings *serverSettings) {
 	var probe struct {
 		ShellCheckPath      *string         `json:"shellcheckPath"`
 		ShellCheckArguments json.RawMessage `json:"shellcheckArguments"`
+		FormatIndentSpaces  json.RawMessage `json:"formatIndentSpaces"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return
@@ -44,6 +46,9 @@ func applySettingsObject(raw json.RawMessage, settings *serverSettings) {
 	}
 	if len(probe.ShellCheckArguments) > 0 {
 		settings.ShellCheckArguments = parseStringList(probe.ShellCheckArguments, settings.ShellCheckArguments)
+	}
+	if len(probe.FormatIndentSpaces) > 0 {
+		settings.FormatIndentSpaces = parseUintPointer(probe.FormatIndentSpaces, settings.FormatIndentSpaces)
 	}
 }
 
@@ -60,6 +65,15 @@ func parseStringList(raw json.RawMessage, current []string) []string {
 		return []string{one}
 	}
 	return current
+}
+
+func parseUintPointer(raw json.RawMessage, current *uint) *uint {
+	var n int
+	if err := json.Unmarshal(raw, &n); err != nil || n < 0 {
+		return current
+	}
+	u := uint(n)
+	return &u
 }
 
 func (s *bashServer) applySettings(settings serverSettings) {

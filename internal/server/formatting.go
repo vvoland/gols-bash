@@ -18,7 +18,12 @@ func (s *bashServer) formatDocument(d *Document, opts protocol.FormattingOptions
 		return nil, nil
 	}
 	var indent uint
-	if opts.InsertSpaces {
+	s.settingsMu.RLock()
+	configuredIndent := s.settings.FormatIndentSpaces
+	s.settingsMu.RUnlock()
+	if configuredIndent != nil {
+		indent = *configuredIndent
+	} else if opts.InsertSpaces {
 		indent = uint(opts.TabSize)
 		if indent == 0 {
 			indent = 4

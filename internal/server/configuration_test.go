@@ -15,23 +15,29 @@ import (
 func TestParseSettingsAcceptsTopLevelShellCheckConfig(t *testing.T) {
 	settings := parseSettings([]byte(`{
 		"shellcheckPath": "/custom/shellcheck",
-		"shellcheckArguments": ["--external-sources"]
+		"shellcheckArguments": ["--external-sources"],
+		"formatIndentSpaces": 2
 	}`), defaultSettings())
 
 	assert.Equal(t, settings.ShellCheckPath, "/custom/shellcheck")
 	assert.DeepEqual(t, settings.ShellCheckArguments, []string{"--external-sources"})
+	assert.Assert(t, settings.FormatIndentSpaces != nil)
+	assert.Equal(t, *settings.FormatIndentSpaces, uint(2))
 }
 
 func TestParseSettingsAcceptsNestedBashIdeConfig(t *testing.T) {
 	settings := parseSettings([]byte(`{
 		"bashIde": {
 			"shellcheckPath": "/nested/shellcheck",
-			"shellcheckArguments": "--shell=bash"
+			"shellcheckArguments": "--shell=bash",
+			"formatIndentSpaces": 3
 		}
 	}`), defaultSettings())
 
 	assert.Equal(t, settings.ShellCheckPath, "/nested/shellcheck")
 	assert.DeepEqual(t, settings.ShellCheckArguments, []string{"--shell=bash"})
+	assert.Assert(t, settings.FormatIndentSpaces != nil)
+	assert.Equal(t, *settings.FormatIndentSpaces, uint(3))
 }
 
 func TestDidChangeConfigurationDisablesShellCheckAndRelintsOpenDocs(t *testing.T) {

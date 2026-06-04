@@ -61,6 +61,7 @@ func pickPositionEncoding(raw json.RawMessage) PositionEncoding {
 // ServerCapabilities, so we use a local shape for the initialize reply.
 type serverCapabilities struct {
 	TextDocumentSync           any              `json:"textDocumentSync,omitempty"`
+	CompletionProvider         any              `json:"completionProvider,omitempty"`
 	DocumentSymbolProvider     bool             `json:"documentSymbolProvider,omitempty"`
 	DocumentFormattingProvider bool             `json:"documentFormattingProvider,omitempty"`
 	DefinitionProvider         bool             `json:"definitionProvider,omitempty"`
@@ -86,6 +87,10 @@ func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 			TextDocumentSync: &protocol.TextDocumentSyncOptions{
 				OpenClose: true,
 				Change:    protocol.TextDocumentSyncKindFull,
+			},
+			CompletionProvider: &protocol.CompletionOptions{
+				ResolveProvider:   true,
+				TriggerCharacters: []string{"$", "{", "-"},
 			},
 			DocumentSymbolProvider:     true,
 			DocumentFormattingProvider: true,

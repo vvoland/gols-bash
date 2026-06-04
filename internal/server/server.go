@@ -162,6 +162,25 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		s.publishDiagnostics(ctx, p.TextDocument.URI, 0, nil)
 		return reply(ctx, nil, nil)
 
+	case protocol.MethodTextDocumentCompletion:
+		var p protocol.CompletionParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal completion: %w", err))
+		}
+		d, _ := s.docs.Get(p.TextDocument.URI)
+		items := s.completion(d, p.Position)
+		if items == nil {
+			items = []protocol.CompletionItem{}
+		}
+		return reply(ctx, &protocol.CompletionList{Items: items}, nil)
+
+	case protocol.MethodCompletionItemResolve:
+		var p protocol.CompletionItem
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal completion resolve: %w", err))
+		}
+		return reply(ctx, &p, nil)
+
 	case protocol.MethodTextDocumentFormatting:
 		var p protocol.DocumentFormattingParams
 		if err := json.Unmarshal(req.Params(), &p); err != nil {

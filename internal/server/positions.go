@@ -49,3 +49,24 @@ func (s *bashServer) posToLSP(text string, p syntax.Pos) protocol.Position {
 func (s *bashServer) rangeToLSP(text string, start, end syntax.Pos) protocol.Range {
 	return protocol.Range{Start: s.posToLSP(text, start), End: s.posToLSP(text, end)}
 }
+
+func (s *bashServer) posForOffset(text string, off int) protocol.Position {
+	if off < 0 {
+		off = 0
+	}
+	if off > len(text) {
+		off = len(text)
+	}
+	line, lineStart := 0, 0
+	for i := 0; i < off; i++ {
+		if text[i] == '\n' {
+			line++
+			lineStart = i + 1
+		}
+	}
+	colText := text[lineStart:off]
+	if s.encoding() == EncodingUTF8 {
+		return protocol.Position{Line: uint32(line), Character: uint32(len(colText))}
+	}
+	return protocol.Position{Line: uint32(line), Character: uint32(utillsp.UTF16Len(colText))}
+}

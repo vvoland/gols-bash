@@ -23,6 +23,8 @@ func (s *bashServer) formatDocument(d *Document, opts protocol.FormattingOptions
 	s.settingsMu.RUnlock()
 	if configuredIndent != nil {
 		indent = *configuredIndent
+	} else if editorIndent := editorConfigIndent(d.URI.Filename()); editorIndent != nil {
+		indent = *editorIndent
 	} else if opts.InsertSpaces {
 		indent = uint(opts.TabSize)
 		if indent == 0 {

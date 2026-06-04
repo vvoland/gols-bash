@@ -3,6 +3,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -90,6 +92,66 @@ func TestFormattingUsesConfiguredIndent(t *testing.T) {
 		"expected configured 3-space indent; got %q", edits[0].NewText)
 	assert.Assert(t, !strings.Contains(edits[0].NewText, "\techo hi"),
 		"configured space indent should override LSP tab option; got %q", edits[0].NewText)
+}
+
+func TestFormattingUsesEditorConfigIndent(t *testing.T) {
+	root := t.TempDir()
+	assert.NilError(t, os.WriteFile(filepath.Join(root, ".editorconfig"), []byte(`root = true
+
+[*.sh]
+indent_style = space
+indent_size = 3
+`), 0o644))
+	path := filepath.Join(root, "script.sh")
+	s, _ := newTestServer()
+	u := uri.File(path)
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI: u, Version: 1,
+			Text: "if true; then\necho hi\nfi\n",
+		},
+	})
+
+	edits := call[[]protocol.TextEdit](t, s, protocol.MethodTextDocumentFormatting,
+		protocol.DocumentFormattingParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: u},
+			Options:      protocol.FormattingOptions{InsertSpaces: false, TabSize: 4},
+		})
+
+	assert.Assert(t, cmp.Len(edits, 1))
+	assert.Assert(t, strings.Contains(edits[0].NewText, "\n   echo hi"),
+		"expected .editorconfig 3-space indent; got %q", edits[0].NewText)
+}
+
+func TestFormattingConfigOverridesEditorConfigIndent(t *testing.T) {
+	root := t.TempDir()
+	assert.NilError(t, os.WriteFile(filepath.Join(root, ".editorconfig"), []byte(`root = true
+
+[*.sh]
+indent_style = space
+indent_size = 8
+`), 0o644))
+	path := filepath.Join(root, "script.sh")
+	s, _ := newTestServer()
+	u := uri.File(path)
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI: u, Version: 1,
+			Text: "if true; then\necho hi\nfi\n",
+		},
+	})
+	dispatch(t, s, protocol.MethodWorkspaceDidChangeConfiguration, protocol.DidChangeConfigurationParams{
+		Settings: map[string]interface{}{"formatIndentSpaces": 2},
+	})
+
+	edits := call[[]protocol.TextEdit](t, s, protocol.MethodTextDocumentFormatting,
+		protocol.DocumentFormattingParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}})
+
+	assert.Assert(t, cmp.Len(edits, 1))
+	assert.Assert(t, strings.Contains(edits[0].NewText, "\n  echo hi"),
+		"expected configured 2-space indent; got %q", edits[0].NewText)
+	assert.Assert(t, !strings.Contains(edits[0].NewText, "\n        echo hi"),
+		"server config should override .editorconfig; got %q", edits[0].NewText)
 }
 
 func TestFormattingSkipsBrokenBuffer(t *testing.T) {

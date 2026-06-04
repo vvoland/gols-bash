@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"go.lsp.dev/protocol"
 	"gotest.tools/v3/assert"
 )
 
@@ -36,5 +37,8 @@ func TestInitializeAdvertisesPickedEncoding(t *testing.T) {
 	assert.Equal(t, res.Capabilities.DefinitionProvider, true)
 	assert.Assert(t, res.Capabilities.CompletionProvider != nil)
 	assert.Assert(t, res.Capabilities.CodeActionProvider != nil)
+	rename, ok := res.Capabilities.RenameProvider.(*protocol.RenameOptions)
+	assert.Assert(t, ok)
+	assert.Equal(t, rename.PrepareProvider, true)
 	assert.Equal(t, res.Capabilities.WorkspaceSymbolProvider, true)
 }

@@ -84,6 +84,48 @@ func TestRenameRejectsInvalidIdentifier(t *testing.T) {
 	assert.Assert(t, gotErr != nil, "expected error for invalid name")
 }
 
+func TestPrepareRenameReturnsDeclaredSymbolRange(t *testing.T) {
+	s, _ := newTestServer()
+	u := uri.URI("file:///tmp/r.sh")
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: u, Version: 1, Text: "name=world\necho $name\n"},
+	})
+
+	r := call[*protocol.Range](t, s, protocol.MethodTextDocumentPrepareRename,
+		protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: u},
+			Position:     protocol.Position{Line: 1, Character: 7},
+		}})
+
+	assert.Assert(t, r != nil)
+	assert.Equal(t, r.Start.Line, uint32(1))
+	assert.Equal(t, r.Start.Character, uint32(6))
+	assert.Equal(t, r.End.Line, uint32(1))
+	assert.Equal(t, r.End.Character, uint32(10))
+}
+
+func TestPrepareRenameRejectsUndeclaredAndInvalidSymbols(t *testing.T) {
+	s, _ := newTestServer()
+	u := uri.URI("file:///tmp/r.sh")
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: u, Version: 1, Text: "_=ignored\necho hi\n"},
+	})
+
+	r := call[*protocol.Range](t, s, protocol.MethodTextDocumentPrepareRename,
+		protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: u},
+			Position:     protocol.Position{Line: 1, Character: 0},
+		}})
+	assert.Assert(t, r == nil)
+
+	r = call[*protocol.Range](t, s, protocol.MethodTextDocumentPrepareRename,
+		protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: u},
+			Position:     protocol.Position{Line: 0, Character: 0},
+		}})
+	assert.Assert(t, r == nil)
+}
+
 func TestRenameSkippedForUndeclared(t *testing.T) {
 	s, _ := newTestServer()
 	u := uri.URI("file:///tmp/r.sh")

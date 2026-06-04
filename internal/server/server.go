@@ -227,6 +227,14 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		edit, err := s.rename(d, p.Position, p.NewName)
 		return reply(ctx, edit, err)
 
+	case protocol.MethodTextDocumentPrepareRename:
+		var p protocol.PrepareRenameParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal prepareRename: %w", err))
+		}
+		d, _ := s.docs.Get(p.TextDocument.URI)
+		return reply(ctx, s.prepareRename(d, p.Position), nil)
+
 	case protocol.MethodTextDocumentDocumentHighlight:
 		var p protocol.DocumentHighlightParams
 		if err := json.Unmarshal(req.Params(), &p); err != nil {

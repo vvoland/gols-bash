@@ -47,6 +47,25 @@ func (s *bashServer) rename(d *Document, pos protocol.Position, newName string) 
 	return &protocol.WorkspaceEdit{Changes: changes}, nil
 }
 
+func (s *bashServer) prepareRename(d *Document, pos protocol.Position) *protocol.Range {
+	if d == nil || d.AST == nil {
+		return nil
+	}
+	off := s.offsetForPosition(d.Text, int(pos.Line), int(pos.Character))
+	if off < 0 {
+		return nil
+	}
+	word, start, end := utillsp.WordAtOffset(d.Text, off)
+	if !isValidIdentifier(word) || word == "_" {
+		return nil
+	}
+	if !hasDeclaration(s.index.AllUsages(word, true)) {
+		return nil
+	}
+	r := protocol.Range{Start: s.posForOffset(d.Text, start), End: s.posForOffset(d.Text, end)}
+	return &r
+}
+
 func hasDeclaration(hits []analyser.UsageHit) bool {
 	for _, h := range hits {
 		if h.Usage.Kind == analyser.UsageWrite {

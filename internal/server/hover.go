@@ -4,16 +4,18 @@ package server
 
 import (
 	"fmt"
+	"path/filepath"
+	"sort"
 
 	"go.lsp.dev/protocol"
 	"mvdan.cc/sh/v3/syntax"
 
+	"grono.dev/gols-bash/internal/analyser"
 	"grono.dev/gols-bash/internal/data"
 	utillsp "grono.dev/gols-bash/internal/util/lsp"
 )
 
 // hover returns the markup shown on hover.
-// Lookup is limited to reserved words, builtins, and same-file functions.
 func (s *bashServer) hover(d *Document, pos protocol.Position) *protocol.Hover {
 	if d == nil {
 		return nil
@@ -26,7 +28,7 @@ func (s *bashServer) hover(d *Document, pos protocol.Position) *protocol.Hover {
 	if word == "" {
 		return nil
 	}
-	md := hoverMarkdownFor(word, d)
+	md := s.hoverMarkdownFor(word, d)
 	if md == "" {
 		return nil
 	}
@@ -35,7 +37,7 @@ func (s *bashServer) hover(d *Document, pos protocol.Position) *protocol.Hover {
 	}
 }
 
-func hoverMarkdownFor(word string, d *Document) string {
+func (s *bashServer) hoverMarkdownFor(word string, d *Document) string {
 	switch {
 	case data.IsReservedWord(word):
 		return fmt.Sprintf("**%s** — bash reserved word", word)
@@ -45,7 +47,34 @@ func hoverMarkdownFor(word string, d *Document) string {
 	if fn := findLocalFunction(d.AST, word); fn != nil {
 		return fmt.Sprintf("**%s** — local function (declared at line %d)", word, fn.Pos().Line())
 	}
+	if hit, ok := s.findWorkspaceDeclaration(word); ok {
+		return fmt.Sprintf("**%s** — workspace %s (declared in `%s` at line %d)",
+			word, hoverDeclarationKind(hit.Declaration.Kind), filepath.Base(hit.URI.Filename()), hit.Declaration.Pos.Line())
+	}
 	return ""
+}
+
+func (s *bashServer) findWorkspaceDeclaration(word string) (analyser.DeclarationHit, bool) {
+	hits := s.index.AllDeclarations()
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].URI != hits[j].URI {
+			return hits[i].URI < hits[j].URI
+		}
+		return hits[i].Declaration.Pos.Offset() < hits[j].Declaration.Pos.Offset()
+	})
+	for _, h := range hits {
+		if h.Declaration.Name == word {
+			return h, true
+		}
+	}
+	return analyser.DeclarationHit{}, false
+}
+
+func hoverDeclarationKind(kind analyser.DeclarationKind) string {
+	if kind == analyser.DeclarationVariable {
+		return "variable"
+	}
+	return "function"
 }
 
 func findLocalFunction(file *syntax.File, name string) *syntax.FuncDecl {

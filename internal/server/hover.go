@@ -46,15 +46,15 @@ func (s *bashServer) hoverMarkdownFor(word string, d *Document) string {
 	if fn := findLocalFunction(d.AST, word); fn != nil {
 		return fmt.Sprintf("**%s** — local function (declared at line %d)", word, fn.Pos().Line())
 	}
-	if hit, ok := s.findWorkspaceDeclaration(word); ok {
+	if hit, ok := s.findWorkspaceDeclaration(d, word); ok {
 		return fmt.Sprintf("**%s** — workspace %s (declared in `%s` at line %d)",
 			word, hoverDeclarationKind(hit.Declaration.Kind), filepath.Base(hit.URI.Filename()), hit.Declaration.Pos.Line())
 	}
 	return ""
 }
 
-func (s *bashServer) findWorkspaceDeclaration(word string) (analyser.DeclarationHit, bool) {
-	for _, h := range sortedDeclarationHits(s.index.AllDeclarations()) {
+func (s *bashServer) findWorkspaceDeclaration(d *Document, word string) (analyser.DeclarationHit, bool) {
+	for _, h := range sortedDeclarationHits(s.index.ReachableDeclarations(d.URI)) {
 		if h.Declaration.Name == word {
 			return h, true
 		}

@@ -69,8 +69,24 @@ type DeclarationHit struct {
 func (i *Index) AllDeclarations() []DeclarationHit {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
+	return declarationHits(i.entries, nil)
+}
+
+// ReachableDeclarations walks declarations in files connected to from by
+// literal source/. statements.
+func (i *Index) ReachableDeclarations(from uri.URI) []DeclarationHit {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	allowed := reachableURIs(i.entries, from)
+	return declarationHits(i.entries, allowed)
+}
+
+func declarationHits(entries map[uri.URI]*syntax.File, allowed map[uri.URI]bool) []DeclarationHit {
 	var hits []DeclarationHit
-	for u, file := range i.entries {
+	for u, file := range entries {
+		if allowed != nil && !allowed[u] {
+			continue
+		}
 		for _, decl := range FindDeclarations(file) {
 			hits = append(hits, DeclarationHit{URI: u, Declaration: decl})
 		}

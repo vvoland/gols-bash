@@ -71,6 +71,35 @@ func TestDefinitionJumpsToWorkspaceDeclaration(t *testing.T) {
 	root := t.TempDir()
 	libPath := filepath.Join(root, "lib.sh")
 	usePath := filepath.Join(root, "use.sh")
+	unrelatedPath := filepath.Join(root, "unrelated.sh")
+	libSrc := "greet() { echo hi; }\n"
+	unrelatedSrc := "greet() { echo bye; }\n"
+	assert.NilError(t, os.WriteFile(libPath, []byte(libSrc), 0o644))
+	assert.NilError(t, os.WriteFile(unrelatedPath, []byte(unrelatedSrc), 0o644))
+
+	s, _ := newTestServer()
+	s.index.AddOrReplace(uri.File(libPath), s.indexParse(libPath, libSrc))
+	s.index.AddOrReplace(uri.File(unrelatedPath), s.indexParse(unrelatedPath, unrelatedSrc))
+	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: uri.File(usePath), Version: 1, Text: ". ./lib.sh\ngreet\n"},
+	})
+
+	locs := call[[]protocol.Location](t, s, protocol.MethodTextDocumentDefinition,
+		protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(usePath)},
+			Position:     protocol.Position{Line: 1, Character: 0},
+		}})
+
+	assert.Assert(t, cmp.Len(locs, 1))
+	assert.Equal(t, locs[0].URI, uri.File(libPath))
+	assert.Equal(t, locs[0].Range.Start.Line, uint32(0))
+	assert.Equal(t, locs[0].Range.Start.Character, uint32(0))
+}
+
+func TestDefinitionSkipsUnrelatedWorkspaceDeclaration(t *testing.T) {
+	root := t.TempDir()
+	libPath := filepath.Join(root, "lib.sh")
+	usePath := filepath.Join(root, "use.sh")
 	libSrc := "greet() { echo hi; }\n"
 	assert.NilError(t, os.WriteFile(libPath, []byte(libSrc), 0o644))
 
@@ -86,10 +115,7 @@ func TestDefinitionJumpsToWorkspaceDeclaration(t *testing.T) {
 			Position:     protocol.Position{Line: 0, Character: 0},
 		}})
 
-	assert.Assert(t, cmp.Len(locs, 1))
-	assert.Equal(t, locs[0].URI, uri.File(libPath))
-	assert.Equal(t, locs[0].Range.Start.Line, uint32(0))
-	assert.Equal(t, locs[0].Range.Start.Character, uint32(0))
+	assert.Assert(t, cmp.Len(locs, 0))
 }
 
 func TestDefinitionJumpsToSourcedFile(t *testing.T) {

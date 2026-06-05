@@ -16,7 +16,8 @@ import (
 )
 
 // definition resolves the word under pos to an indexed function or variable
-// declaration, preferring declarations in the current document.
+// declaration in the current sourced-file component.
+// It prefers declarations in the current document.
 func (s *bashServer) definition(d *Document, pos protocol.Position) []protocol.Location {
 	if d == nil || d.AST == nil {
 		return nil
@@ -41,7 +42,7 @@ func (s *bashServer) definition(d *Document, pos protocol.Position) []protocol.L
 			Range: s.rangeToLSP(d.Text, decl.Pos, decl.End),
 		}}
 	}
-	for _, hit := range sortedDeclarationHits(s.index.AllDeclarations()) {
+	for _, hit := range sortedDeclarationHits(s.index.ReachableDeclarations(d.URI)) {
 		if hit.URI == d.URI || hit.Declaration.Name != word {
 			continue
 		}

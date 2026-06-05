@@ -19,8 +19,10 @@ func TestReferencesCrossFile(t *testing.T) {
 	root := t.TempDir()
 	libPath := filepath.Join(root, "lib.sh")
 	usePath := filepath.Join(root, "use.sh")
+	unrelatedPath := filepath.Join(root, "unrelated.sh")
 	assert.NilError(t, os.WriteFile(libPath, []byte("greet() { echo hi; }\n"), 0o644))
-	assert.NilError(t, os.WriteFile(usePath, []byte("greet\ngreet\n"), 0o644))
+	assert.NilError(t, os.WriteFile(usePath, []byte(". ./lib.sh\ngreet\ngreet\n"), 0o644))
+	assert.NilError(t, os.WriteFile(unrelatedPath, []byte("greet() { echo bye; }\ngreet\n"), 0o644))
 
 	s, _ := newTestServer()
 	parseBash := func(name, src string) *syntax.File {
@@ -29,7 +31,7 @@ func TestReferencesCrossFile(t *testing.T) {
 	}
 	// Pre-populate the index without going through initialize (the
 	// initialized handler does this asynchronously in production).
-	for _, p := range []string{libPath, usePath} {
+	for _, p := range []string{libPath, usePath, unrelatedPath} {
 		b, _ := os.ReadFile(p)
 		s.index.AddOrReplace(uri.File(p), parseBash(p, string(b)))
 	}
@@ -37,14 +39,14 @@ func TestReferencesCrossFile(t *testing.T) {
 	// Open use.sh as the active document.
 	useURI := uri.File(usePath)
 	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: useURI, Version: 1, Text: "greet\ngreet\n"},
+		TextDocument: protocol.TextDocumentItem{URI: useURI, Version: 1, Text: ". ./lib.sh\ngreet\ngreet\n"},
 	})
 
 	locs := call[[]protocol.Location](t, s, protocol.MethodTextDocumentReferences,
 		protocol.ReferenceParams{
 			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: useURI},
-				Position:     protocol.Position{Line: 0, Character: 0},
+				Position:     protocol.Position{Line: 1, Character: 0},
 			},
 			Context: protocol.ReferenceContext{IncludeDeclaration: true},
 		})
@@ -57,6 +59,7 @@ func TestReferencesCrossFile(t *testing.T) {
 	}
 	assert.Assert(t, contains(uris, string(uri.File(libPath))))
 	assert.Assert(t, contains(uris, string(useURI)))
+	assert.Assert(t, !contains(uris, string(uri.File(unrelatedPath))))
 }
 
 func contains(s []string, x string) bool {

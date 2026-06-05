@@ -10,8 +10,9 @@ import (
 	utillsp "grono.dev/gols-bash/internal/util/lsp"
 )
 
-// rename returns a best-effort workspace-wide edit for the word under pos.
-// It does not yet model Bash local scope or sourced-file reachability.
+// rename returns a best-effort edit for the word under pos in files connected
+// by literal source/. statements.
+// It does not yet model Bash local scope.
 //
 // Returns (nil, error) when newName is missing or not a valid identifier.
 // Returns (empty WorkspaceEdit, nil) when the cursor is on no word or the
@@ -32,7 +33,7 @@ func (s *bashServer) rename(d *Document, pos protocol.Position, newName string) 
 	if word == "" {
 		return &protocol.WorkspaceEdit{}, nil
 	}
-	hits := s.index.AllUsages(word, true)
+	hits := s.index.ReachableUsages(d.URI, word, true)
 	if !hasDeclaration(hits) {
 		return &protocol.WorkspaceEdit{}, nil
 	}
@@ -59,7 +60,7 @@ func (s *bashServer) prepareRename(d *Document, pos protocol.Position) *protocol
 	if !isValidIdentifier(word) || word == "_" {
 		return nil
 	}
-	if !hasDeclaration(s.index.AllUsages(word, true)) {
+	if !hasDeclaration(s.index.ReachableUsages(d.URI, word, true)) {
 		return nil
 	}
 	r := protocol.Range{Start: s.posForOffset(d.Text, start), End: s.posForOffset(d.Text, end)}

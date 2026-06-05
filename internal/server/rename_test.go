@@ -21,29 +21,31 @@ func TestRenameAcrossFiles(t *testing.T) {
 	root := t.TempDir()
 	libPath := filepath.Join(root, "lib.sh")
 	usePath := filepath.Join(root, "use.sh")
+	unrelatedPath := filepath.Join(root, "unrelated.sh")
 	assert.NilError(t, os.WriteFile(libPath, []byte("greet() { echo hi; }\n"), 0o644))
-	assert.NilError(t, os.WriteFile(usePath, []byte("greet\ngreet\n"), 0o644))
+	assert.NilError(t, os.WriteFile(usePath, []byte(". ./lib.sh\ngreet\ngreet\n"), 0o644))
+	assert.NilError(t, os.WriteFile(unrelatedPath, []byte("greet() { echo bye; }\ngreet\n"), 0o644))
 
 	s, _ := newTestServer()
 	parseBash := func(name, src string) *syntax.File {
 		f, _ := syntax.NewParser().Parse(strings.NewReader(src), name)
 		return f
 	}
-	for _, p := range []string{libPath, usePath} {
+	for _, p := range []string{libPath, usePath, unrelatedPath} {
 		b, _ := os.ReadFile(p)
 		s.index.AddOrReplace(uri.File(p), parseBash(p, string(b)))
 	}
 
 	useURI := uri.File(usePath)
 	dispatch(t, s, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: useURI, Version: 1, Text: "greet\ngreet\n"},
+		TextDocument: protocol.TextDocumentItem{URI: useURI, Version: 1, Text: ". ./lib.sh\ngreet\ngreet\n"},
 	})
 
 	edit := call[*protocol.WorkspaceEdit](t, s, protocol.MethodTextDocumentRename,
 		protocol.RenameParams{
 			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: useURI},
-				Position:     protocol.Position{Line: 0, Character: 0},
+				Position:     protocol.Position{Line: 1, Character: 0},
 			},
 			NewName: "salute",
 		})
@@ -52,6 +54,7 @@ func TestRenameAcrossFiles(t *testing.T) {
 	assert.Assert(t, cmp.Len(edit.Changes, 2)) // two URIs
 	assert.Assert(t, cmp.Len(edit.Changes[protocol.DocumentURI(useURI)], 2))
 	assert.Assert(t, cmp.Len(edit.Changes[protocol.DocumentURI(uri.File(libPath))], 1))
+	assert.Assert(t, cmp.Len(edit.Changes[protocol.DocumentURI(uri.File(unrelatedPath))], 0))
 	for _, edits := range edit.Changes {
 		for _, e := range edits {
 			assert.Equal(t, e.NewText, "salute")

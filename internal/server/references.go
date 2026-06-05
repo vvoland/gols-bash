@@ -11,8 +11,8 @@ import (
 	utillsp "grono.dev/gols-bash/internal/util/lsp"
 )
 
-// references returns indexed occurrences of the word under pos.
-// It is name-based and does not yet model Bash scope or sourced-file reachability.
+// references returns indexed occurrences of the word under pos in files
+// connected by literal source/. statements.
 func (s *bashServer) references(d *Document, pos protocol.Position, includeDecl bool) []protocol.Location {
 	if d == nil || d.AST == nil {
 		return nil
@@ -25,7 +25,7 @@ func (s *bashServer) references(d *Document, pos protocol.Position, includeDecl 
 	if word == "" {
 		return nil
 	}
-	hits := s.index.AllUsages(word, includeDecl)
+	hits := s.index.ReachableUsages(d.URI, word, includeDecl)
 	out := make([]protocol.Location, 0, len(hits))
 	for _, h := range hits {
 		text := s.textForURI(h.URI)

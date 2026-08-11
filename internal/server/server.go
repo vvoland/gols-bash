@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,6 +26,11 @@ import (
 // to jsonrpc2.Conn.Notify; tests substitute a recording stub.
 type notifyFunc func(ctx context.Context, method string, params any) error
 
+// ErrExitWithoutShutdown reports the LSP-mandated abnormal exit status.
+// The exit notification itself was handled cleanly and should not be logged as
+// a server failure.
+var ErrExitWithoutShutdown = errors.New("exit received before shutdown")
+
 // Config is the runtime configuration passed in from main.
 type Config struct {
 	In      io.ReadCloser
@@ -41,27 +47,49 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer closeLog()
 
+	runCtx, cancel := context.WithCancel(ctx)
 	stream := jsonrpc2.NewStream(stdio{r: cfg.In, w: cfg.Out})
 	conn := jsonrpc2.NewConn(stream)
 
 	settings := defaultSettings()
 	runner := newShellCheckRunner(settings.ShellCheckPath, settings.ShellCheckArguments, logger)
 	srv := &bashServer{
-		log:         logger,
-		docs:        NewDocumentStore(),
-		notify:      conn.Notify,
-		index:       analyser.NewIndex(),
-		codeActions: make(map[uri.URI][]protocol.CodeAction),
-		settings:    settings,
-		shellcheck:  runner.lint,
+		log:             logger,
+		docs:            NewDocumentStore(),
+		notify:          conn.Notify,
+		index:           analyser.NewIndex(),
+		codeActions:     make(map[uri.URI][]protocol.CodeAction),
+		settings:        settings,
+		shellcheck:      runner.lint,
+		exit:            make(chan struct{}),
+		cancel:          cancel,
+		closeConnection: conn.Close,
 	}
 	runner.encoding = srv.encoding
-	conn.Go(ctx, srv.handle)
+	conn.Go(runCtx, srv.handle)
+	defer func() {
+		cancel()
+		_ = conn.Close()
+		<-conn.Done()
+	}()
 
+	exitResult := func() error {
+		if srv.abnormalExit.Load() {
+			return ErrExitWithoutShutdown
+		}
+		return nil
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-srv.exit:
+		return exitResult()
 	case <-conn.Done():
+		select {
+		case <-srv.exit:
+			return exitResult()
+		default:
+		}
 		if err := conn.Err(); err != nil {
 			return err
 		}
@@ -70,17 +98,37 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 type bashServer struct {
-	log            *slog.Logger
-	docs           *DocumentStore
-	notify         notifyFunc
-	posEncoding    atomic.Uint32
-	index          *analyser.Index
-	codeActionsMu  sync.RWMutex
-	codeActions    map[uri.URI][]protocol.CodeAction
-	settingsMu     sync.RWMutex
-	settings       serverSettings
-	shellcheck     shellcheckFunc
-	workspaceRoots []string
+	log             *slog.Logger
+	docs            *DocumentStore
+	notify          notifyFunc
+	posEncoding     atomic.Uint32
+	index           *analyser.Index
+	codeActionsMu   sync.RWMutex
+	codeActions     map[uri.URI][]protocol.CodeAction
+	settingsMu      sync.RWMutex
+	settings        serverSettings
+	shellcheck      shellcheckFunc
+	workspaceRoots  []string
+	shutdown        atomic.Bool
+	abnormalExit    atomic.Bool
+	exitOnce        sync.Once
+	exit            chan struct{}
+	cancel          context.CancelFunc
+	closeConnection func() error
+}
+
+func (s *bashServer) signalExit() {
+	s.exitOnce.Do(func() {
+		if s.exit != nil {
+			close(s.exit)
+		}
+		if s.cancel != nil {
+			s.cancel()
+		}
+		if s.closeConnection != nil {
+			_ = s.closeConnection()
+		}
+	})
 }
 
 // indexParse parses src for the workspace scanner. Errors are swallowed
@@ -126,6 +174,9 @@ func (s *bashServer) publishDiagnostics(ctx context.Context, u uri.URI, version 
 }
 
 func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	if s.shutdown.Load() && req.Method() != protocol.MethodExit {
+		return reply(ctx, nil, jsonrpc2.ErrInvalidRequest)
+	}
 	switch req.Method() {
 	case protocol.MethodInitialize:
 		return reply(ctx, s.initialize(req.Params()), nil)
@@ -141,11 +192,18 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 
 	case protocol.MethodShutdown:
 		s.log.Info("shutdown requested")
-		return reply(ctx, nil, nil)
+		err := reply(ctx, nil, nil)
+		if err == nil {
+			s.shutdown.Store(true)
+		}
+		return err
 
 	case protocol.MethodExit:
 		s.log.Info("exit")
-		return reply(ctx, nil, nil)
+		err := reply(ctx, nil, nil)
+		s.abnormalExit.Store(!s.shutdown.Load())
+		s.signalExit()
+		return err
 
 	case protocol.MethodTextDocumentDidOpen:
 		var p protocol.DidOpenTextDocumentParams

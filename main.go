@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -55,7 +56,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := server.Run(ctx, cfg); err != nil {
+	if err := server.Run(ctx, cfg); errors.Is(err, server.ErrExitWithoutShutdown) {
+		os.Exit(1)
+	} else if err != nil {
 		slog.With("error", err).ErrorContext(ctx, "server exited with error")
 		os.Exit(1)
 	}

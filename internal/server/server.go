@@ -38,7 +38,7 @@ type Config struct {
 	In      io.ReadCloser
 	Out     io.WriteCloser
 	LogFile string
-	Verbose bool
+	Level   slog.Level
 }
 
 // Run blocks until the client disconnects or ctx is cancelled.
@@ -412,10 +412,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 }
 
 func newLogger(cfg Config) (*slog.Logger, func(), error) {
-	level := slog.LevelInfo
-	if cfg.Verbose {
-		level = slog.LevelDebug
-	}
+	level := cfg.Level
 
 	var w io.Writer = os.Stderr
 	closeFn := func() {}

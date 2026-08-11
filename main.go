@@ -50,7 +50,7 @@ func main() {
 		In:      os.Stdin,
 		Out:     os.Stdout,
 		LogFile: *flagLogFile,
-		Verbose: lvl <= slog.LevelDebug,
+		Level:   lvl,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

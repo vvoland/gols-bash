@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"slices"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -32,6 +33,11 @@ func (e PositionEncoding) String() string {
 	return "utf-16"
 }
 
+// MarshalJSON emits the protocol spelling rather than the internal enum value.
+func (e PositionEncoding) MarshalJSON() ([]byte, error) {
+	return json.Marshal(e.String())
+}
+
 // pickPositionEncoding inspects raw initialize params for
 // GeneralClientCapabilities.PositionEncodings (LSP 3.17) and picks the
 // most efficient encoding we support — UTF-8 first, then UTF-16.
@@ -49,10 +55,8 @@ func pickPositionEncoding(raw json.RawMessage) PositionEncoding {
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return EncodingUTF16
 	}
-	for _, enc := range probe.Capabilities.General.PositionEncodings {
-		if enc == "utf-8" {
-			return EncodingUTF8
-		}
+	if slices.Contains(probe.Capabilities.General.PositionEncodings, "utf-8") {
+		return EncodingUTF8
 	}
 	return EncodingUTF16
 }

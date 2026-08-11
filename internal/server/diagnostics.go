@@ -11,9 +11,11 @@ import (
 	"log/slog"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"go.lsp.dev/protocol"
+	utillsp "grono.dev/gols-bash/internal/util/lsp"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -47,6 +49,7 @@ type shellCheckRunner struct {
 	path     string
 	args     []string
 	log      *slog.Logger
+	encoding func() PositionEncoding
 	disabled atomic.Bool
 }
 
@@ -77,7 +80,11 @@ func (r *shellCheckRunner) lint(ctx context.Context, d *Document) (diagnosticRes
 		}
 		return diagnosticResult{}, nil
 	}
-	lintResult, parseErr := shellCheckDiagnostics(d.URI, stdout.Bytes())
+	enc := EncodingUTF16
+	if r.encoding != nil {
+		enc = r.encoding()
+	}
+	lintResult, parseErr := shellCheckDiagnostics(d.URI, d.Text, enc, stdout.Bytes())
 	if parseErr != nil {
 		return diagnosticResult{}, parseErr
 	}
@@ -109,7 +116,7 @@ type shellCheckReplacement struct {
 	Replacement string `json:"replacement"`
 }
 
-func shellCheckDiagnostics(u protocol.DocumentURI, raw []byte) (diagnosticResult, error) {
+func shellCheckDiagnostics(u protocol.DocumentURI, text string, enc PositionEncoding, raw []byte) (diagnosticResult, error) {
 	var out shellCheckOutput
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return diagnosticResult{}, err
@@ -119,7 +126,7 @@ func shellCheckDiagnostics(u protocol.DocumentURI, raw []byte) (diagnosticResult
 	for _, c := range out.Comments {
 		code := "SC" + strconv.Itoa(c.Code)
 		diag := protocol.Diagnostic{
-			Range:           shellCheckRange(c),
+			Range:           shellCheckRange(text, enc, c),
 			Severity:        shellCheckSeverity(c.Level),
 			Code:            code,
 			CodeDescription: &protocol.CodeDescription{Href: protocol.URI("https://www.shellcheck.net/wiki/" + code)},
@@ -127,24 +134,28 @@ func shellCheckDiagnostics(u protocol.DocumentURI, raw []byte) (diagnosticResult
 			Message:         c.Message,
 		}
 		diags = append(diags, diag)
-		if action := shellCheckCodeAction(u, code, diag, c); action != nil {
+		if action := shellCheckCodeAction(u, text, enc, code, diag, c); action != nil {
 			actions = append(actions, *action)
 		}
 	}
 	return diagnosticResult{Diagnostics: diags, CodeActions: actions}, nil
 }
 
-func shellCheckCodeAction(u protocol.DocumentURI, code string, diag protocol.Diagnostic, c shellCheckComment) *protocol.CodeAction {
+func shellCheckCodeAction(
+	u protocol.DocumentURI,
+	text string,
+	enc PositionEncoding,
+	code string,
+	diag protocol.Diagnostic,
+	c shellCheckComment,
+) *protocol.CodeAction {
 	if c.Fix == nil || len(c.Fix.Replacements) == 0 {
 		return nil
 	}
 	edits := make([]protocol.TextEdit, 0, len(c.Fix.Replacements))
 	for _, r := range c.Fix.Replacements {
 		edits = append(edits, protocol.TextEdit{
-			Range: protocol.Range{
-				Start: shellCheckPosition(r.Line, r.Column),
-				End:   shellCheckPosition(r.EndLine, r.EndColumn),
-			},
+			Range:   shellCheckSourceRange(text, enc, r.Line, r.Column, r.EndLine, r.EndColumn),
 			NewText: r.Replacement,
 		})
 	}
@@ -173,30 +184,52 @@ func shellCheckSeverity(level string) protocol.DiagnosticSeverity {
 	}
 }
 
-func shellCheckRange(c shellCheckComment) protocol.Range {
-	start := shellCheckPosition(c.Line, c.Column)
-	endLine, endColumn := c.EndLine, c.EndColumn
-	if endLine == 0 {
-		endLine = c.Line
+func shellCheckRange(text string, enc PositionEncoding, c shellCheckComment) protocol.Range {
+	return shellCheckSourceRange(text, enc, c.Line, c.Column, c.EndLine, c.EndColumn)
+}
+
+func shellCheckSourceRange(text string, enc PositionEncoding, line, column, endLine, endColumn int) protocol.Range {
+	start := shellCheckPosition(text, enc, line, column)
+	if endLine <= 0 {
+		endLine = line
 	}
-	if endColumn == 0 {
-		endColumn = c.Column + 1
+	if endColumn <= 0 {
+		endColumn = column + 1
 	}
-	end := shellCheckPosition(endLine, endColumn)
+	end := shellCheckPosition(text, enc, endLine, endColumn)
 	if end.Line < start.Line || end.Line == start.Line && end.Character < start.Character {
 		end = start
 	}
 	return protocol.Range{Start: start, End: end}
 }
 
-func shellCheckPosition(line, column int) protocol.Position {
+func shellCheckPosition(text string, enc PositionEncoding, line, column int) protocol.Position {
 	if line <= 0 {
 		line = 1
 	}
 	if column <= 0 {
 		column = 1
 	}
-	return protocol.Position{Line: uint32(line - 1), Character: uint32(column - 1)}
+	fallback := protocol.Position{Line: uint32(line - 1), Character: uint32(column - 1)}
+	lines := strings.Split(text, "\n")
+	if line > len(lines) {
+		return fallback
+	}
+	runes := []rune(lines[line-1])
+	codePoints := column - 1
+	if codePoints > len(runes) {
+		return fallback
+	}
+	prefix := string(runes[:codePoints])
+	switch enc {
+	case EncodingUTF8:
+		fallback.Character = uint32(len(prefix))
+	case EncodingUTF32:
+		fallback.Character = uint32(codePoints)
+	default:
+		fallback.Character = uint32(utillsp.UTF16Len(prefix))
+	}
+	return fallback
 }
 
 // parseDiagnostics converts a mvdan/sh parse error into LSP diagnostics.

@@ -23,7 +23,7 @@ import (
 
 // notifyFunc sends a notification to the client. Real connections wire this
 // to jsonrpc2.Conn.Notify; tests substitute a recording stub.
-type notifyFunc func(ctx context.Context, method string, params interface{}) error
+type notifyFunc func(ctx context.Context, method string, params any) error
 
 // Config is the runtime configuration passed in from main.
 type Config struct {
@@ -45,6 +45,7 @@ func Run(ctx context.Context, cfg Config) error {
 	conn := jsonrpc2.NewConn(stream)
 
 	settings := defaultSettings()
+	runner := newShellCheckRunner(settings.ShellCheckPath, settings.ShellCheckArguments, logger)
 	srv := &bashServer{
 		log:         logger,
 		docs:        NewDocumentStore(),
@@ -52,8 +53,9 @@ func Run(ctx context.Context, cfg Config) error {
 		index:       analyser.NewIndex(),
 		codeActions: make(map[uri.URI][]protocol.CodeAction),
 		settings:    settings,
-		shellcheck:  newShellCheckRunner(settings.ShellCheckPath, settings.ShellCheckArguments, logger).lint,
+		shellcheck:  runner.lint,
 	}
+	runner.encoding = srv.encoding
 	conn.Go(ctx, srv.handle)
 
 	select {

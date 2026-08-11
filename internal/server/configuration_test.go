@@ -14,6 +14,20 @@ import (
 	"gotest.tools/v3/assert/cmp"
 )
 
+func TestApplySettingsPassesNegotiatedEncodingToShellCheck(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "shellcheck")
+	assert.NilError(t, os.WriteFile(script, []byte("#!/bin/sh\necho '{\"comments\":[{\"line\":1,\"endLine\":1,\"column\":7,\"endColumn\":12,\"level\":\"warning\",\"code\":2086,\"message\":\"quote it\"}]}'\n"), 0o755))
+	assert.NilError(t, os.Chmod(script, 0o755))
+	s, _ := newTestServer()
+	s.initialize([]byte(`{"capabilities":{"general":{"positionEncodings":["utf-8"]}}}`))
+	s.applySettings(serverSettings{ShellCheckPath: script})
+	d := &Document{URI: uri.URI("file:///tmp/unicode.sh"), Text: "echo é$name\n"}
+	result, err := s.shellcheck(context.Background(), d)
+	assert.NilError(t, err)
+	assert.Assert(t, cmp.Len(result.Diagnostics, 1))
+	assert.Equal(t, result.Diagnostics[0].Range.Start.Character, uint32(7))
+}
+
 func TestParseSettingsAcceptsTopLevelShellCheckConfig(t *testing.T) {
 	settings := parseSettings([]byte(`{
 		"shellcheckPath": "/custom/shellcheck",
@@ -75,7 +89,7 @@ func TestDidChangeConfigurationDisablesShellCheckAndRelintsOpenDocs(t *testing.T
 	})
 
 	dispatch(t, s, protocol.MethodWorkspaceDidChangeConfiguration, protocol.DidChangeConfigurationParams{
-		Settings: map[string]interface{}{"shellcheckPath": ""},
+		Settings: map[string]any{"shellcheckPath": ""},
 	})
 
 	assert.Assert(t, cmp.Len(rec.sent, 2))

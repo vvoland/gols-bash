@@ -29,7 +29,7 @@ type notifyRecorder struct {
 	sent []recordedNotification
 }
 
-func (r *notifyRecorder) notify(_ context.Context, method string, params interface{}) error {
+func (r *notifyRecorder) notify(_ context.Context, method string, params any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b, _ := json.Marshal(params)
@@ -52,9 +52,9 @@ func newTestServer() (*bashServer, *notifyRecorder) {
 	return s, rec
 }
 
-func nopReplier(_ context.Context, _ interface{}, _ error) error { return nil }
+func nopReplier(_ context.Context, _ any, _ error) error { return nil }
 
-func dispatch(t *testing.T, s *bashServer, method string, params interface{}) {
+func dispatch(t *testing.T, s *bashServer, method string, params any) {
 	t.Helper()
 	n, err := jsonrpc2.NewNotification(method, params)
 	assert.NilError(t, err)
@@ -136,7 +136,7 @@ func TestShellCheckDiagnosticsParsesJSON(t *testing.T) {
 		}]
 	}`)
 
-	result, err := shellCheckDiagnostics(uri.URI("file:///tmp/lint.sh"), raw)
+	result, err := shellCheckDiagnostics(uri.URI("file:///tmp/lint.sh"), "#!/bin/sh\necho $name\n", EncodingUTF16, raw)
 	assert.NilError(t, err)
 	diags := result.Diagnostics
 	assert.Assert(t, cmp.Len(diags, 1))
@@ -173,7 +173,7 @@ func TestShellCheckDiagnosticsCreatesCodeActions(t *testing.T) {
 	}`)
 
 	u := uri.URI("file:///tmp/lint.sh")
-	result, err := shellCheckDiagnostics(u, raw)
+	result, err := shellCheckDiagnostics(u, "echo $name\n", EncodingUTF16, raw)
 	assert.NilError(t, err)
 	assert.Assert(t, cmp.Len(result.CodeActions, 1))
 	action := result.CodeActions[0]
@@ -181,6 +181,50 @@ func TestShellCheckDiagnosticsCreatesCodeActions(t *testing.T) {
 	assert.Equal(t, action.Title, "Apply fix for SC2086")
 	assert.Assert(t, cmp.Len(action.Edit.Changes[u], 1))
 	assert.Equal(t, action.Edit.Changes[u][0].NewText, "\"$name\"")
+}
+
+func TestShellCheckPositionsUseNegotiatedEncoding(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		enc  PositionEncoding
+		want uint32
+	}{
+		{name: "utf-8 multibyte BMP", text: "echo é$name\n", enc: EncodingUTF8, want: 7},
+		{name: "utf-16 non-BMP", text: "echo 😀$name\n", enc: EncodingUTF16, want: 7},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(`{
+				"comments": [{
+					"line": 1,
+					"endLine": 1,
+					"column": 7,
+					"endColumn": 12,
+					"level": "warning",
+					"code": 2086,
+					"message": "quote it",
+					"fix": {"replacements": [{
+						"line": 1,
+						"endLine": 1,
+						"column": 7,
+						"endColumn": 12,
+						"replacement": "quoted"
+					}]}
+				}]
+			}`)
+			u := uri.URI("file:///tmp/unicode.sh")
+			result, err := shellCheckDiagnostics(u, tc.text, tc.enc, raw)
+			assert.NilError(t, err)
+			assert.Assert(t, cmp.Len(result.Diagnostics, 1))
+			assert.Equal(t, result.Diagnostics[0].Range.Start.Character, tc.want)
+			assert.Equal(t, result.Diagnostics[0].Range.End.Character, tc.want+5)
+			assert.Assert(t, cmp.Len(result.CodeActions, 1))
+			edit := result.CodeActions[0].Edit.Changes[u][0]
+			assert.Equal(t, edit.Range.Start.Character, tc.want)
+			assert.Equal(t, edit.Range.End.Character, tc.want+5)
+		})
+	}
 }
 
 func TestCodeActionReturnsStoredQuickFixes(t *testing.T) {

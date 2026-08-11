@@ -87,7 +87,9 @@ func (s *bashServer) applySettings(settings serverSettings) {
 	if settings.ShellCheckPath == "" {
 		s.shellcheck = nil
 	} else {
-		s.shellcheck = newShellCheckRunner(settings.ShellCheckPath, settings.ShellCheckArguments, s.log).lint
+		runner := newShellCheckRunner(settings.ShellCheckPath, settings.ShellCheckArguments, s.log)
+		runner.encoding = s.encoding
+		s.shellcheck = runner.lint
 	}
 	s.settingsMu.Unlock()
 }

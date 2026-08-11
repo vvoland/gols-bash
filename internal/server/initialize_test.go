@@ -41,4 +41,14 @@ func TestInitializeAdvertisesPickedEncoding(t *testing.T) {
 	assert.Assert(t, ok)
 	assert.Equal(t, rename.PrepareProvider, true)
 	assert.Equal(t, res.Capabilities.WorkspaceSymbolProvider, true)
+
+	wire, err := json.Marshal(res)
+	assert.NilError(t, err)
+	var decoded struct {
+		Capabilities struct {
+			PositionEncoding any `json:"positionEncoding"`
+		} `json:"capabilities"`
+	}
+	assert.NilError(t, json.Unmarshal(wire, &decoded))
+	assert.Equal(t, decoded.Capabilities.PositionEncoding, any("utf-8"))
 }

@@ -24,6 +24,7 @@ over stdin/stdout and is not meant to be invoked interactively.
 
 ## Status
 
-Early scaffolding. Currently handles `initialize`, `initialized`,
-`shutdown`, and `exit` only. Document sync, diagnostics, hover,
-completion, and goto-definition are not yet implemented.
+Implemented features include document open, change, save, and close; Bash
+parsing; ShellCheck diagnostics and fixes; formatting; navigation,
+refactoring, completion, and symbols; workspace scanning and watched-file
+updates; configuration; lifecycle handling; and stdio transport.

@@ -3,6 +3,7 @@
 package server
 
 import (
+	"maps"
 	"strings"
 	"sync"
 
@@ -71,6 +72,22 @@ func (s *DocumentStore) Update(u uri.URI, version int32, text string) (*Document
 	return d, true
 }
 
+// Save returns the current open document, reparsing supplied saved text when
+// the client included it in the notification.
+func (s *DocumentStore) Save(u uri.URI, text *string) (*Document, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.docs[u]
+	if !ok {
+		return nil, false
+	}
+	if text != nil {
+		d.Text = *text
+		d.reparse()
+	}
+	return d, true
+}
+
 func (s *DocumentStore) Close(u uri.URI) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,8 +111,6 @@ func (s *DocumentStore) All() map[uri.URI]*Document {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make(map[uri.URI]*Document, len(s.docs))
-	for k, v := range s.docs {
-		out[k] = v
-	}
+	maps.Copy(out, s.docs)
 	return out
 }

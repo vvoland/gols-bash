@@ -26,6 +26,8 @@ import (
 // to jsonrpc2.Conn.Notify; tests substitute a recording stub.
 type notifyFunc func(ctx context.Context, method string, params any) error
 
+type callFunc func(ctx context.Context, method string, params, result any) (jsonrpc2.ID, error)
+
 // ErrExitWithoutShutdown reports the LSP-mandated abnormal exit status.
 // The exit notification itself was handled cleanly and should not be logged as
 // a server failure.
@@ -57,6 +59,7 @@ func Run(ctx context.Context, cfg Config) error {
 		log:             logger,
 		docs:            NewDocumentStore(),
 		notify:          conn.Notify,
+		call:            conn.Call,
 		index:           analyser.NewIndex(),
 		codeActions:     make(map[uri.URI][]protocol.CodeAction),
 		settings:        settings,
@@ -71,6 +74,7 @@ func Run(ctx context.Context, cfg Config) error {
 		cancel()
 		_ = conn.Close()
 		<-conn.Done()
+		srv.background.Wait()
 	}()
 
 	exitResult := func() error {
@@ -98,23 +102,27 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 type bashServer struct {
-	log             *slog.Logger
-	docs            *DocumentStore
-	notify          notifyFunc
-	posEncoding     atomic.Uint32
-	index           *analyser.Index
-	codeActionsMu   sync.RWMutex
-	codeActions     map[uri.URI][]protocol.CodeAction
-	settingsMu      sync.RWMutex
-	settings        serverSettings
-	shellcheck      shellcheckFunc
-	workspaceRoots  []string
-	shutdown        atomic.Bool
-	abnormalExit    atomic.Bool
-	exitOnce        sync.Once
-	exit            chan struct{}
-	cancel          context.CancelFunc
-	closeConnection func() error
+	log                 *slog.Logger
+	docs                *DocumentStore
+	notify              notifyFunc
+	call                callFunc
+	posEncoding         atomic.Uint32
+	index               *analyser.Index
+	workspaceMu         sync.Mutex
+	codeActionsMu       sync.RWMutex
+	codeActions         map[uri.URI][]protocol.CodeAction
+	settingsMu          sync.RWMutex
+	settings            serverSettings
+	shellcheck          shellcheckFunc
+	workspaceRoots      []string
+	dynamicWatchedFiles atomic.Bool
+	shutdown            atomic.Bool
+	abnormalExit        atomic.Bool
+	exitOnce            sync.Once
+	exit                chan struct{}
+	cancel              context.CancelFunc
+	closeConnection     func() error
+	background          sync.WaitGroup
 }
 
 func (s *bashServer) signalExit() {
@@ -152,7 +160,10 @@ func (s *bashServer) scanWorkspaces(ctx context.Context) {
 		return
 	}
 	for _, root := range s.workspaceRoots {
-		if err := analyser.ScanWorkspace(ctx, root, s.index, s.indexParse); err != nil {
+		if err := analyser.ScanWorkspacePaths(ctx, root, s.indexWorkspacePath); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			s.log.Warn("workspace scan failed", "root", root, "error", err)
 		}
 	}
@@ -183,11 +194,23 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 
 	case protocol.MethodInitialized:
 		s.log.Info("client initialized", "workspaceRoots", s.workspaceRoots)
-		go s.scanWorkspaces(context.Background())
-		return reply(ctx, nil, nil)
+		if err := reply(ctx, nil, nil); err != nil {
+			return err
+		}
+		s.goBackground(ctx, s.scanWorkspaces)
+		if s.dynamicWatchedFiles.Load() {
+			// This must be asynchronous: jsonrpc2's read loop does not process
+			// the response to a server call until this handler has returned.
+			s.goBackground(ctx, s.registerFileWatchers)
+		}
+		return nil
 
 	case protocol.MethodWorkspaceDidChangeConfiguration:
 		s.handleDidChangeConfiguration(ctx, req.Params())
+		return reply(ctx, nil, nil)
+
+	case protocol.MethodWorkspaceDidChangeWatchedFiles:
+		s.handleDidChangeWatchedFiles(req.Params())
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodShutdown:
@@ -210,9 +233,8 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		if err := json.Unmarshal(req.Params(), &p); err != nil {
 			return reply(ctx, nil, fmt.Errorf("unmarshal didOpen: %w", err))
 		}
-		d := s.docs.Open(p.TextDocument)
+		d := s.openDocument(p.TextDocument)
 		s.log.Debug("didOpen", "uri", d.URI, "lang", d.Lang, "len", len(d.Text))
-		s.index.AddOrReplace(d.URI, d.AST)
 		s.publishDiagnostics(ctx, d.URI, d.Version, s.documentDiagnostics(ctx, d))
 		return reply(ctx, nil, nil)
 
@@ -225,13 +247,25 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 			return reply(ctx, nil, nil)
 		}
 		last := p.ContentChanges[len(p.ContentChanges)-1]
-		d, ok := s.docs.Update(p.TextDocument.URI, p.TextDocument.Version, last.Text)
+		d, ok := s.updateDocument(p.TextDocument.URI, p.TextDocument.Version, last.Text)
 		if !ok {
 			s.log.Warn("didChange for unopened document", "uri", p.TextDocument.URI)
 			return reply(ctx, nil, nil)
 		}
-		s.index.AddOrReplace(d.URI, d.AST)
 		s.publishDiagnostics(ctx, d.URI, d.Version, s.documentDiagnostics(ctx, d))
+		return reply(ctx, nil, nil)
+
+	case protocol.MethodTextDocumentDidSave:
+		var p struct {
+			TextDocument protocol.TextDocumentIdentifier `json:"textDocument"`
+			Text         *string                         `json:"text,omitempty"`
+		}
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return reply(ctx, nil, fmt.Errorf("unmarshal didSave: %w", err))
+		}
+		if _, ok := s.saveDocument(p.TextDocument.URI, p.Text); !ok {
+			s.log.Warn("didSave for unopened document", "uri", p.TextDocument.URI)
+		}
 		return reply(ctx, nil, nil)
 
 	case protocol.MethodTextDocumentDidClose:
@@ -239,7 +273,7 @@ func (s *bashServer) handle(ctx context.Context, reply jsonrpc2.Replier, req jso
 		if err := json.Unmarshal(req.Params(), &p); err != nil {
 			return reply(ctx, nil, fmt.Errorf("unmarshal didClose: %w", err))
 		}
-		s.docs.Close(p.TextDocument.URI)
+		s.closeDocument(p.TextDocument.URI)
 		s.setCodeActions(p.TextDocument.URI, nil)
 		s.publishDiagnostics(ctx, p.TextDocument.URI, 0, nil)
 		return reply(ctx, nil, nil)

@@ -41,6 +41,10 @@ func TestInitializeAdvertisesPickedEncoding(t *testing.T) {
 	assert.Assert(t, ok)
 	assert.Equal(t, rename.PrepareProvider, true)
 	assert.Equal(t, res.Capabilities.WorkspaceSymbolProvider, true)
+	syncOptions, ok := res.Capabilities.TextDocumentSync.(*protocol.TextDocumentSyncOptions)
+	assert.Assert(t, ok)
+	assert.Assert(t, syncOptions.Save != nil)
+	assert.Equal(t, syncOptions.Save.IncludeText, true)
 
 	wire, err := json.Marshal(res)
 	assert.NilError(t, err)

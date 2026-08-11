@@ -52,6 +52,20 @@ func IsShellPath(path string) bool {
 // on individual files are logged and skipped — one broken file should not
 // stop the index from coming up.
 func ScanWorkspace(ctx context.Context, root string, idx *Index, parse func(name, src string) *syntax.File) error {
+	return ScanWorkspacePaths(ctx, root, func(path string) {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			slog.Debug("read error", "path", path, "err", err)
+			return
+		}
+		idx.AddOrReplace(uri.File(path), parse(path, string(src)))
+	})
+}
+
+// ScanWorkspacePaths walks root and passes each shell script path to visit.
+// Callers that need to coordinate reads and index writes with other state can
+// perform that synchronization in visit.
+func ScanWorkspacePaths(ctx context.Context, root string, visit func(path string)) error {
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			slog.Debug("walk error", "path", path, "err", err)
@@ -69,13 +83,7 @@ func ScanWorkspace(ctx context.Context, root string, idx *Index, parse func(name
 		if !IsShellPath(path) {
 			return nil
 		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			slog.Debug("read error", "path", path, "err", err)
-			return nil
-		}
-		file := parse(path, string(src))
-		idx.AddOrReplace(uri.File(path), file)
+		visit(path)
 		return nil
 	})
 }

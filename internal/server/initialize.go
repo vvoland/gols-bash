@@ -61,6 +61,22 @@ func pickPositionEncoding(raw json.RawMessage) PositionEncoding {
 	return EncodingUTF16
 }
 
+func supportsDynamicWatchedFiles(raw json.RawMessage) bool {
+	var probe struct {
+		Capabilities struct {
+			Workspace struct {
+				DidChangeWatchedFiles struct {
+					DynamicRegistration bool `json:"dynamicRegistration"`
+				} `json:"didChangeWatchedFiles"`
+			} `json:"workspace"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return probe.Capabilities.Workspace.DidChangeWatchedFiles.DynamicRegistration
+}
+
 // go.lsp.dev/protocol is LSP 3.16 and lacks positionEncoding on
 // ServerCapabilities, so we use a local shape for the initialize reply.
 type serverCapabilities struct {
@@ -87,12 +103,14 @@ func (s *bashServer) initialize(raw json.RawMessage) *initializeResult {
 	enc := pickPositionEncoding(raw)
 	s.posEncoding.Store(uint32(enc))
 	s.workspaceRoots = extractWorkspaceRoots(raw)
+	s.dynamicWatchedFiles.Store(supportsDynamicWatchedFiles(raw))
 
 	return &initializeResult{
 		Capabilities: serverCapabilities{
 			TextDocumentSync: &protocol.TextDocumentSyncOptions{
 				OpenClose: true,
 				Change:    protocol.TextDocumentSyncKindFull,
+				Save:      &protocol.SaveOptions{IncludeText: true},
 			},
 			CompletionProvider: &protocol.CompletionOptions{
 				ResolveProvider:   true,
